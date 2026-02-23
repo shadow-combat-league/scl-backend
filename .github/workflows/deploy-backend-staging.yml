@@ -1,14 +1,7 @@
 name: Deploy Backend to Staging
 
 on:
-  push:
-    branches: [staging]
-    paths:
-      - 'src/**'
-      - 'package.json'
-      - 'Dockerfile'
-      - '.github/workflows/deploy-backend-staging.yml'
-  workflow_dispatch:  # Manual deployment also available
+  workflow_dispatch:  # Manual deployment only - trigger via GitHub Actions UI
 
 env:
   AWS_REGION: ap-southeast-1
