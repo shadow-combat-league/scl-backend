@@ -75,4 +75,24 @@ export class GameController {
     const referral = await this.referralService.getReferralInfo(walletAddress)
     return { status, referral }
   }
+
+  @Get('test-wordpress-settings')
+  async testWordPressSettings() {
+    const settings = await this.gameService.getSettings()
+    return {
+      message: 'Game settings fetched from WordPress (single source of truth)',
+      settings: {
+        launchDate: settings.launchDate.toISOString(),
+        gameState: settings.gameState,
+        weeklyResetEnabled: settings.weeklyResetEnabled,
+        weeklyResetDay: settings.weeklyResetDay,
+        weeklyResetHour: settings.weeklyResetHour,
+        weeklyResetMinute: settings.weeklyResetMinute,
+        streakBaseMultiplier: settings.streakBaseMultiplier,
+        streakIncrementPerDay: settings.streakIncrementPerDay,
+        referralExtraPlays: settings.referralExtraPlays,
+      },
+      timestamp: new Date().toISOString(),
+    }
+  }
 }

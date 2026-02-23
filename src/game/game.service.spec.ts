@@ -4,8 +4,8 @@ import { ConfigService } from '@nestjs/config'
 import { GameService } from './game.service'
 import { Cache } from 'cache-manager'
 import { PrismaService, PrismaClient } from '../prisma/prisma.service'
+import { GameSettings, createTestGameSettings } from './types/game-settings.type'
 
-type GameSettings = Awaited<ReturnType<PrismaClient['gameSettings']['findUnique']>>
 type Player = Awaited<ReturnType<PrismaClient['player']['findUnique']>>
 
 describe('GameService time scaling', () => {
@@ -61,20 +61,10 @@ describe('GameService time scaling', () => {
 
   it('honors a short virtual day (secondsPerDay) when calculating playsRemaining and nextAvailableAt', async () => {
     const launchDate = new Date('2025-01-01T00:00:00.000Z')
-    const settings: GameSettings = {
-      referralExtraPlays: 3,
-      id: 1,
+    const settings = createTestGameSettings({
       launchDate,
-      gameState: 'ACTIVE',
-      streakBaseMultiplier: 1,
-      streakIncrementPerDay: 0.1,
-      createdAt: launchDate,
-      updatedAt: launchDate,
       secondsPerDay: 120, // 2 minutes = 1 game day
-      weeklyResetEnabled: false,
-      weeklyResetDay: 0,
-      currentWeekNumber: null,
-    }
+    })
 
     const prismaClient = prisma as PrismaClient
     jest.spyOn(prismaClient.gameSettings, 'findUnique').mockResolvedValue(settings)

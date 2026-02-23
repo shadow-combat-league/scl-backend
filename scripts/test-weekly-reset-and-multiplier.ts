@@ -216,12 +216,13 @@ async function testMultiplierCalculation() {
 async function testWeeklyReset() {
   console.log('\n🔄 Testing Weekly Reset...')
   
-  const settings = await prisma.gameSettings.findUnique({ where: { id: 1 } })
-  if (!settings) {
+  // Get settings from API (which merges WordPress + DB)
+  const settings = await apiGet(`${API_BASE}/api/game/test-wordpress-settings`)
+  if (!settings || !settings.settings) {
     throw new Error('GameSettings not found')
   }
   
-  if (!settings.weeklyResetEnabled) {
+  if (!settings.settings.weeklyResetEnabled) {
     logTest(
       'Weekly Reset Enabled',
       false,
@@ -231,7 +232,7 @@ async function testWeeklyReset() {
   }
   
   // Get current week number
-  const currentWeek = settings.currentWeekNumber ?? 0
+  const currentWeek = settings.settings?.currentWeekNumber ?? 0
   
   // Get players before reset
   const playersBefore = await prisma.player.findMany({

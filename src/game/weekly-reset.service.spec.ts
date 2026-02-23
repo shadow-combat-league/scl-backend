@@ -5,8 +5,8 @@ import { GameService } from './game.service'
 import { PrismaService, PrismaClient } from '../prisma/prisma.service'
 import { CACHE_MANAGER } from '@nestjs/cache-manager'
 import { Cache } from 'cache-manager'
+import { GameSettings, createTestGameSettings } from './types/game-settings.type'
 
-type GameSettings = Awaited<ReturnType<PrismaClient['gameSettings']['findUnique']>>
 type Player = Awaited<ReturnType<PrismaClient['player']['findUnique']>>
 
 describe('WeeklyResetService', () => {
@@ -81,20 +81,9 @@ describe('WeeklyResetService', () => {
 
   describe('Weekly Reset - Basic Functionality', () => {
     it('should not perform reset when weekly reset is disabled', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
-        secondsPerDay: null,
-        weeklyResetEnabled: false,
-        weeklyResetDay: 0,
-        currentWeekNumber: null,
-      }
+      })
 
       jest.spyOn(gameService, 'getSettings').mockResolvedValue(settings)
       jest.spyOn(prismaClient.gameSettings, 'update').mockResolvedValue(settings)
@@ -107,20 +96,13 @@ describe('WeeklyResetService', () => {
     })
 
     it('should perform reset when week number increases', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60, // 1 minute = 1 day
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0, // Week 0
-      }
+      })
 
       const player1: Player = {
         id: 1,
@@ -137,7 +119,7 @@ describe('WeeklyResetService', () => {
         weeklyStreak: 5,
         weeklyLongestStreak: 5,
         lastResetWeekNumber: 0,
-      }
+      })
 
       const player2: Player = {
         id: 2,
@@ -154,7 +136,7 @@ describe('WeeklyResetService', () => {
         weeklyStreak: 3,
         weeklyLongestStreak: 3,
         lastResetWeekNumber: null, // Never reset
-      }
+      })
 
       // Mock current time: 8 days after launch (Week 1)  
       const now = new Date(launchDate.getTime() + 8 * 60 * 1000)
@@ -164,10 +146,23 @@ describe('WeeklyResetService', () => {
       const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(nowMs)
       
       // Mock getSettings AFTER Date.now() is mocked
-      jest.spyOn(gameService, 'getSettings').mockResolvedValue(settings)
-      jest.spyOn(prismaClient.gameSettings, 'update').mockResolvedValue({
-        ...settings,
+      const settingsWithWeek = createTestGameSettings({
+        launchDate,
+        secondsPerDay: 60,
+        weeklyResetEnabled: true,
+        weeklyResetDay: 0,
         currentWeekNumber: 1,
+      })
+      jest.spyOn(gameService, 'getSettings').mockResolvedValue(settingsWithWeek)
+      jest.spyOn(prismaClient.gameSettings, 'update').mockResolvedValue({
+        id: 1,
+        streakBaseMultiplier: 1.0,
+        streakIncrementPerDay: 0.1,
+        secondsPerDay: 60,
+        currentWeekNumber: 1,
+        referralExtraPlays: 3,
+        createdAt: launchDate,
+        updatedAt: launchDate,
       })
       jest.spyOn(prismaClient.player, 'findMany').mockResolvedValue([player1, player2])
       jest.spyOn(prismaClient.player, 'update').mockResolvedValue(player1)
@@ -227,22 +222,16 @@ describe('WeeklyResetService', () => {
     })
 
     it('should not reset players already reset in current week', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 1,
-      }
+      })
 
       const player: Player = {
+
         id: 1,
         walletAddress: '0xPLAYER1',
         launchDate,
@@ -250,14 +239,16 @@ describe('WeeklyResetService', () => {
         currentStreak: 2,
         longestStreak: 2,
         lastPlayDate: new Date(launchDate.getTime() + 8 * 60 * 1000),
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
         lifetimeTotalScore: 5000,
         weeklyScore: 1000,
         weeklyStreak: 2,
         weeklyLongestStreak: 2,
         lastResetWeekNumber: 1, // Already reset in week 1
-      }
+        createdAt: launchDate,
+        updatedAt: launchDate,
+      })
 
       const now = new Date(launchDate.getTime() + 8 * 60 * 1000) // Still week 1
       const originalDateNow = Date.now
@@ -275,22 +266,16 @@ describe('WeeklyResetService', () => {
     })
 
     it('should preserve lifetime score when resetting weekly score', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       const player: Player = {
+
         id: 1,
         walletAddress: '0xPLAYER1',
         launchDate,
@@ -298,14 +283,18 @@ describe('WeeklyResetService', () => {
         currentStreak: 5,
         longestStreak: 5,
         lastPlayDate: launchDate,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
         lifetimeTotalScore: 2000, // Existing lifetime score
         weeklyScore: 8000, // Current weekly score
         weeklyStreak: 5,
         weeklyLongestStreak: 5,
         lastResetWeekNumber: 0,
-      }
+      createdAt: new Date(),
+
+      updatedAt: new Date(),
+
+      })
 
       const now = new Date(launchDate.getTime() + 8 * 60 * 1000) // Week 1
       const originalDateNow = Date.now
@@ -337,20 +326,13 @@ describe('WeeklyResetService', () => {
 
   describe('Weekly Reset - Virtual Time (secondsPerDay)', () => {
     it('should calculate week number correctly with secondsPerDay = 60', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60, // 1 minute = 1 day
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       // Test various time points
       const testCases = [
@@ -376,28 +358,22 @@ describe('WeeklyResetService', () => {
           expect(prismaClient.gameSettings.update).toHaveBeenCalledWith({
             where: { id: 1 },
             data: { currentWeekNumber: testCase.expectedWeek },
-          })
+          }
         }
-      }
+      })
     })
 
     it('should handle reset with secondsPerDay = 3600 (1 hour = 1 day)', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 3600, // 1 hour = 1 day
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       const player: Player = {
+
         id: 1,
         walletAddress: '0xPLAYER1',
         launchDate,
@@ -405,14 +381,18 @@ describe('WeeklyResetService', () => {
         currentStreak: 3,
         longestStreak: 3,
         lastPlayDate: launchDate,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
         lifetimeTotalScore: 0,
         weeklyScore: 5000,
         weeklyStreak: 3,
         weeklyLongestStreak: 3,
         lastResetWeekNumber: 0,
-      }
+      createdAt: new Date(),
+
+      updatedAt: new Date(),
+
+      })
 
       // 8 hours after launch = 8 days = week 1
       const now = new Date(launchDate.getTime() + 8 * 3600 * 1000)
@@ -438,20 +418,13 @@ describe('WeeklyResetService', () => {
 
   describe('Weekly Reset - Real Calendar Time', () => {
     it('should calculate week number correctly with real calendar weeks', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
-        launchDate: new Date('2025-01-05T00:00:00.000Z'), // Sunday
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+      const settings = createTestGameSettings({
+        launchDate,
         secondsPerDay: null, // Real time
         weeklyResetEnabled: true,
         weeklyResetDay: 0, // Sunday
         currentWeekNumber: 0,
-      }
+      })
 
       // Test various dates
       const testCases = [
@@ -475,26 +448,24 @@ describe('WeeklyResetService', () => {
           expect(prismaClient.gameSettings.update).toHaveBeenCalledWith({
             where: { id: 1 },
             data: { currentWeekNumber: testCase.expectedWeek },
-          })
+          }
         }
-      }
+      })
     })
 
     it('should handle different weeklyResetDay values', async () => {
-      const baseSettings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const baseSettings = createTestGameSettings({
         launchDate: new Date('2025-01-05T00:00:00.000Z'), // Sunday
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
+
+
+
         secondsPerDay: null,
         weeklyResetEnabled: true,
         weeklyResetDay: 1, // Monday
         currentWeekNumber: 0,
-      }
+      })
 
       // Use a date that's 8 days after launch (should be week 1)
       // Launch: Sunday 2025-01-05, so 8 days later is Monday 2025-01-13
@@ -516,22 +487,16 @@ describe('WeeklyResetService', () => {
 
   describe('Weekly Reset - Edge Cases', () => {
     it('should handle null lastResetWeekNumber for new players', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       const newPlayer: Player = {
+
         id: 1,
         walletAddress: '0xNEW',
         launchDate,
@@ -539,14 +504,18 @@ describe('WeeklyResetService', () => {
         currentStreak: 0,
         longestStreak: 0,
         lastPlayDate: null,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
         lifetimeTotalScore: 0,
         weeklyScore: 1000,
         weeklyStreak: 1,
         weeklyLongestStreak: 1,
         lastResetWeekNumber: null, // New player
-      }
+      createdAt: new Date(),
+
+      updatedAt: new Date(),
+
+      })
 
       const now = new Date(launchDate.getTime() + 8 * 60 * 1000) // Week 1
       const originalDateNow = Date.now
@@ -576,22 +545,16 @@ describe('WeeklyResetService', () => {
     })
 
     it('should handle players with zero weekly score', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       const player: Player = {
+
         id: 1,
         walletAddress: '0xPLAYER1',
         launchDate,
@@ -599,14 +562,18 @@ describe('WeeklyResetService', () => {
         currentStreak: 0,
         longestStreak: 0,
         lastPlayDate: null,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
         lifetimeTotalScore: 5000,
         weeklyScore: 0, // No weekly score
         weeklyStreak: 0,
         weeklyLongestStreak: 0,
         lastResetWeekNumber: 0,
-      }
+      createdAt: new Date(),
+
+      updatedAt: new Date(),
+
+      })
 
       const now = new Date(launchDate.getTime() + 8 * 60 * 1000)
       const originalDateNow = Date.now
@@ -636,22 +603,16 @@ describe('WeeklyResetService', () => {
     })
 
     it('should handle multiple consecutive resets', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       const player: Player = {
+
         id: 1,
         walletAddress: '0xPLAYER1',
         launchDate,
@@ -659,14 +620,18 @@ describe('WeeklyResetService', () => {
         currentStreak: 2,
         longestStreak: 2,
         lastPlayDate: launchDate,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
         lifetimeTotalScore: 1000,
         weeklyScore: 2000,
         weeklyStreak: 2,
         weeklyLongestStreak: 2,
         lastResetWeekNumber: 0,
-      }
+      createdAt: new Date(),
+
+      updatedAt: new Date(),
+
+      })
 
       // Week 1 reset
       let now = new Date(launchDate.getTime() + 8 * 60 * 1000)
@@ -724,22 +689,16 @@ describe('WeeklyResetService', () => {
     })
 
     it('should handle missed cron runs (catch up on next run)', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0, // Stuck at week 0
-      }
+      })
 
       const player: Player = {
+
         id: 1,
         walletAddress: '0xPLAYER1',
         launchDate,
@@ -747,14 +706,18 @@ describe('WeeklyResetService', () => {
         currentStreak: 5,
         longestStreak: 5,
         lastPlayDate: launchDate,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
         lifetimeTotalScore: 1000,
         weeklyScore: 5000,
         weeklyStreak: 5,
         weeklyLongestStreak: 5,
         lastResetWeekNumber: 0,
-      }
+      createdAt: new Date(),
+
+      updatedAt: new Date(),
+
+      })
 
       // Cron missed weeks 1 and 2, now catching up at week 3
       const now = new Date(launchDate.getTime() + 22 * 60 * 1000) // Week 3
@@ -790,20 +753,13 @@ describe('WeeklyResetService', () => {
     })
 
     it('should not reset when week number has not changed', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 1, // Already at week 1
-      }
+      })
 
       const now = new Date(launchDate.getTime() + 8 * 60 * 1000) // Still week 1
       const originalDateNow = Date.now
@@ -821,22 +777,16 @@ describe('WeeklyResetService', () => {
     })
 
     it('should handle null currentWeekNumber in settings (first reset)', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: null, // First reset
-      }
+      })
 
       const player: Player = {
+
         id: 1,
         walletAddress: '0xPLAYER1',
         launchDate,
@@ -844,14 +794,18 @@ describe('WeeklyResetService', () => {
         currentStreak: 3,
         longestStreak: 3,
         lastPlayDate: launchDate,
-        createdAt: launchDate,
-        updatedAt: launchDate,
+
+
         lifetimeTotalScore: 0,
         weeklyScore: 3000,
         weeklyStreak: 3,
         weeklyLongestStreak: 3,
         lastResetWeekNumber: null,
-      }
+      createdAt: new Date(),
+
+      updatedAt: new Date(),
+
+      })
 
       const now = new Date(launchDate.getTime() + 8 * 60 * 1000) // Week 1
       const originalDateNow = Date.now
@@ -877,20 +831,13 @@ describe('WeeklyResetService', () => {
 
   describe('Weekly Reset - Multiple Players', () => {
     it('should reset multiple players in the same operation', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       const players: Player[] = [
         {
@@ -998,20 +945,13 @@ describe('WeeklyResetService', () => {
     })
 
     it('should only reset players that need reset (skip already reset players)', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       const players: Player[] = [
         {
@@ -1076,20 +1016,13 @@ describe('WeeklyResetService', () => {
 
   describe('Weekly Reset - No Players', () => {
     it('should handle case when no players need reset', async () => {
-      const settings: GameSettings = {
-      referralExtraPlays: 3,
-        id: 1,
+      const settings = createTestGameSettings({
         launchDate,
-        gameState: 'ACTIVE',
-        streakBaseMultiplier: 1,
-        streakIncrementPerDay: 0.1,
-        createdAt: launchDate,
-        updatedAt: launchDate,
         secondsPerDay: 60,
         weeklyResetEnabled: true,
         weeklyResetDay: 0,
         currentWeekNumber: 0,
-      }
+      })
 
       const now = new Date(launchDate.getTime() + 8 * 60 * 1000)
       const originalDateNow = Date.now
@@ -1097,8 +1030,14 @@ describe('WeeklyResetService', () => {
 
       jest.spyOn(gameService, 'getSettings').mockResolvedValue(settings)
       jest.spyOn(prismaClient.gameSettings, 'update').mockResolvedValue({
-        ...settings,
+        id: 1,
+        streakBaseMultiplier: 1.0,
+        streakIncrementPerDay: 0.1,
+        secondsPerDay: 60,
         currentWeekNumber: 1,
+        referralExtraPlays: 3,
+        createdAt: launchDate,
+        updatedAt: launchDate,
       })
       jest.spyOn(prismaClient.player, 'findMany').mockResolvedValue([]) // No players
       jest.spyOn(prismaClient.player, 'update').mockResolvedValue({} as Player)

@@ -2,8 +2,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { PrismaService, PrismaClient } from '../prisma/prisma.service'
 import { GameService } from './game.service'
-
-type GameSettings = Awaited<ReturnType<PrismaClient['gameSettings']['findUnique']>>
+import { TimezoneService } from '../common/timezone.service'
+import { toZonedTime, fromZonedTime } from 'date-fns-tz'
+import { GameSettings } from './types/game-settings.type'
 
 @Injectable()
 export class WeeklyResetService implements OnModuleInit {
@@ -13,6 +14,7 @@ export class WeeklyResetService implements OnModuleInit {
   constructor(
     prismaService: PrismaService,
     private gameService: GameService,
+    private timezoneService: TimezoneService,
   ) {
     this.prisma = prismaService
   }
@@ -50,47 +52,71 @@ export class WeeklyResetService implements OnModuleInit {
    * Calculate the current week number based on launch date.
    * Week 0 is the first week (launch week).
    * In debug mode, uses virtual weeks based on secondsPerDay.
+   * Uses WordPress timezone for production mode (same as livestream system).
    */
-  private calculateCurrentWeekNumber(settings: GameSettings): number {
+  private async calculateCurrentWeekNumber(settings: GameSettings): Promise<number> {
     const nowMs = Date.now()
     const now = new Date(nowMs)
-    const launchDate = new Date(settings.launchDate)
-    // Use UTC methods to avoid timezone issues
-    launchDate.setUTCHours(0, 0, 0, 0)
     
     if (settings.secondsPerDay && settings.secondsPerDay > 0) {
-      // Debug mode: Use virtual weeks
+      // Debug mode: Use virtual weeks (UTC-based)
+      const launchDate = new Date(settings.launchDate)
+      launchDate.setUTCHours(0, 0, 0, 0)
       const dayMs = this.getDayDurationMs(settings)
       const launchMs = launchDate.getTime()
       const daysSinceLaunch = Math.floor((nowMs - launchMs) / dayMs)
       return Math.floor(daysSinceLaunch / 7)
     } else {
-      // Production mode: Use real calendar weeks
-      const resetDay = settings.weeklyResetDay ?? 0 // 0 = Sunday, 1 = Monday, etc.
+      // Production mode: Use real calendar weeks with timezone
+      const wpTimezone = await this.timezoneService.getWordPressTimezone()
+      const resetDay = settings.weeklyResetDay ?? 0
+      const resetHour = settings.weeklyResetHour ?? 1
+      const resetMinute = settings.weeklyResetMinute ?? 0
       
-      // Normalize launch date to the start of its week (based on resetDay)
-      const launchDay = launchDate.getUTCDay()
+      // Get start of day in WordPress timezone for both dates
+      const launchDateTz = await this.timezoneService.getStartOfDayInTimezone(settings.launchDate)
+      if (!launchDateTz) {
+        throw new Error('Failed to parse launch date')
+      }
+      
+      const nowTz = await this.timezoneService.getStartOfDayInTimezone(now)
+      if (!nowTz) {
+        throw new Error('Failed to parse current date')
+      }
+      
+      // Convert to zoned time to get day of week in WordPress timezone
+      const launchZoned = toZonedTime(launchDateTz, wpTimezone)
+      const nowZoned = toZonedTime(nowTz, wpTimezone)
+      
+      const launchDay = launchZoned.getDay()
+      const currentDay = nowZoned.getDay()
+      const currentHour = nowZoned.getHours()
+      const currentMinute = nowZoned.getMinutes()
+      
+      // Normalize launch date to start of its week
       let launchDaysToSubtract = (launchDay - resetDay + 7) % 7
-      const launchWeekStart = new Date(launchDate)
-      launchWeekStart.setUTCDate(launchDate.getUTCDate() - launchDaysToSubtract)
-      launchWeekStart.setUTCHours(0, 0, 0, 0)
+      const launchWeekStartDate = new Date(launchZoned)
+      launchWeekStartDate.setDate(launchZoned.getDate() - launchDaysToSubtract)
+      launchWeekStartDate.setHours(0, 0, 0, 0)
+      const launchWeekStart = fromZonedTime(launchWeekStartDate, wpTimezone)
       
-      // Find the start of the current week (based on resetDay)
-      // Use UTC methods to avoid timezone issues
-      const currentDay = now.getUTCDay()
-      const currentHour = now.getUTCHours()
+      // Find start of current week
       let daysToSubtract = (currentDay - resetDay + 7) % 7
-      if (daysToSubtract === 0 && currentHour < 1) {
-        // If it's the reset day but before 1 AM UTC, go back to previous week
+      const resetTimeMinutes = resetHour * 60 + resetMinute
+      const currentTimeMinutes = currentHour * 60 + currentMinute
+      
+      if (daysToSubtract === 0 && currentTimeMinutes < resetTimeMinutes) {
+        // If it's reset day but before reset time, go back to previous week
         daysToSubtract = 7
       }
       
-      const weekStart = new Date(now)
-      weekStart.setUTCDate(now.getUTCDate() - daysToSubtract)
-      weekStart.setUTCHours(0, 0, 0, 0)
+      const weekStartDate = new Date(nowZoned)
+      weekStartDate.setDate(nowZoned.getDate() - daysToSubtract)
+      weekStartDate.setHours(0, 0, 0, 0)
+      const weekStart = fromZonedTime(weekStartDate, wpTimezone)
       
-      // Calculate week number: weeks since launch week start
-      const weekMs = 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+      // Calculate week number
+      const weekMs = 7 * 24 * 60 * 60 * 1000
       const weeksSinceLaunch = Math.floor((weekStart.getTime() - launchWeekStart.getTime()) / weekMs)
       
       return Math.max(0, weeksSinceLaunch)
@@ -108,7 +134,7 @@ export class WeeklyResetService implements OnModuleInit {
       return
     }
 
-    const currentWeekNumber = this.calculateCurrentWeekNumber(settings)
+    const currentWeekNumber = await this.calculateCurrentWeekNumber(settings)
     const storedWeekNumber = settings.currentWeekNumber
 
     // If week hasn't changed, no reset needed
@@ -125,15 +151,39 @@ export class WeeklyResetService implements OnModuleInit {
       data: { currentWeekNumber },
     })
 
-    // Get all players that need a reset (those with lastResetWeekNumber < currentWeekNumber or null)
-    const players = await this.prisma.player.findMany({
-      where: {
-        OR: [
-          { lastResetWeekNumber: null },
-          { lastResetWeekNumber: { lt: currentWeekNumber } },
-        ],
-      },
-    })
+    // Get all players that need a reset
+    // IMPORTANT: Only reset players who haven't been reset for THIS specific week
+    // If week number jumped (e.g., 0 -> 37512), only reset players who were reset
+    // in the storedWeekNumber or earlier, not players already reset in intermediate weeks
+    let players: Awaited<ReturnType<typeof this.prisma.player.findMany>>
+    
+    if (storedWeekNumber !== null && currentWeekNumber > storedWeekNumber + 1) {
+      // Week number jumped - only reset players who were reset in storedWeekNumber or earlier
+      // This prevents double-resetting players who were already reset in intermediate weeks
+      this.logger.warn(
+        `Week number jumped from ${storedWeekNumber} to ${currentWeekNumber}. ` +
+        `Only resetting players who were reset in week ${storedWeekNumber} or earlier.`
+      )
+      
+      players = await this.prisma.player.findMany({
+        where: {
+          OR: [
+            { lastResetWeekNumber: null },
+            { lastResetWeekNumber: { lte: storedWeekNumber } },
+          ],
+        },
+      })
+    } else {
+      // Normal case: week number increased by 1, reset all players who haven't been reset yet
+      players = await this.prisma.player.findMany({
+        where: {
+          OR: [
+            { lastResetWeekNumber: null },
+            { lastResetWeekNumber: { lt: currentWeekNumber } },
+          ],
+        },
+      })
+    }
 
     if (players.length === 0) {
       this.logger.debug('No players need weekly reset.')

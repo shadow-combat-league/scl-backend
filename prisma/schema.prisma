@@ -83,20 +83,25 @@ enum GameState {
 }
 
 model GameSettings {
-  id                    Int       @id
-  launchDate            DateTime
-  gameState             GameState @default(ACTIVE)
-  streakBaseMultiplier  Float     @default(1.0)
-  streakIncrementPerDay Float     @default(0.1)
-  secondsPerDay         Int?
-  // Weekly reset settings
-  weeklyResetEnabled    Boolean   @default(false)
-  weeklyResetDay        Int       @default(0) // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  currentWeekNumber     Int? // Current week number (updated when week changes)
+  id Int @id
+  // Fields stored in WordPress ACF (single source of truth):
+  // - launchDate (WordPress: game_launch_date)
+  // - gameState (WordPress: game_state)
+  // - weeklyResetEnabled (WordPress: weekly_reset_enabled)
+  // - weeklyResetDay (WordPress: weekly_reset_day)
+  // - weeklyResetHour (WordPress: weekly_reset_hour)
+  // - weeklyResetMinute (WordPress: weekly_reset_minute)
+  // These fields are fetched from WordPress and NOT stored in this table
+
+  // Fields that remain in database (not in WordPress):
+  streakBaseMultiplier  Float    @default(1.0)
+  streakIncrementPerDay Float    @default(0.1)
+  secondsPerDay         Int? // Debug/testing only (virtual days)
+  currentWeekNumber     Int? // Current week number (updated when week changes, computed)
   // Referral settings
-  referralExtraPlays    Int       @default(3) // Extra plays given when using a referral code
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  referralExtraPlays    Int      @default(3) // Extra plays given when using a referral code
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 model ReferralCode {

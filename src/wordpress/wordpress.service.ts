@@ -4,7 +4,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager'
 import { Cache } from 'cache-manager'
 import axios, { AxiosInstance } from 'axios'
 import { ConfigService } from '@nestjs/config'
-import { fromZonedTime } from 'date-fns-tz'
+import { TimezoneService } from '../common/timezone.service'
 
 export interface WordPressPost {
   id: number
@@ -23,6 +23,15 @@ export interface SiteSettings {
   kickUsername: string | null
 }
 
+export interface GameSettingsFromWordPress {
+  launchDate: Date | null
+  gameState: 'ACTIVE' | 'IN_MAINTENANCE' | 'DISABLED' | 'HIDDEN' | null
+  weeklyResetEnabled: boolean | null
+  weeklyResetDay: number | null // 0-6
+  weeklyResetHour: number | null // 0-23
+  weeklyResetMinute: number | null // 0-59
+}
+
 @Injectable()
 export class WordpressService {
   private readonly wpClient: AxiosInstance
@@ -30,6 +39,7 @@ export class WordpressService {
   constructor(
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private configService: ConfigService,
+    private timezoneService: TimezoneService,
   ) {
     const wpUrl = this.configService.get<string>('WORDPRESS_URL', 'http://wordpress:80')
     this.wpClient = axios.create({
@@ -204,127 +214,13 @@ export class WordpressService {
     }
   }
 
-  private wpTimezone: string | null = null
-  private wpTimezoneCacheKey = 'wp:timezone'
-
-  /**
-   * Get WordPress timezone setting
-   * Priority:
-   * 1. WORDPRESS_TIMEZONE environment variable
-   * 2. Try WordPress REST API endpoint (if custom endpoint exists)
-   * 3. Fall back to UTC
-   */
-  private async getWordPressTimezone(): Promise<string> {
-    // Check cache first
-    if (this.wpTimezone) {
-      return this.wpTimezone
-    }
-
-    const cached = await this.cacheManager.get<string>(this.wpTimezoneCacheKey)
-    if (cached) {
-      this.wpTimezone = cached
-      return cached
-    }
-
-    // First priority: Check environment variable
-    const envTimezone = this.configService.get<string>('WORDPRESS_TIMEZONE')
-    if (envTimezone) {
-      this.wpTimezone = envTimezone
-      await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600) // Cache for 1 hour
-      return this.wpTimezone
-    }
-
-    // Second priority: Try WordPress REST API endpoint (if it exists)
-    try {
-      const response = await this.wpClient.get('/wp-json/scl/v1/timezone', {
-        timeout: 5000,
-      })
-      if (response.data && response.data.timezone) {
-        this.wpTimezone = response.data.timezone
-        await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600)
-        return this.wpTimezone
-      }
-    } catch (customEndpointError) {
-      // Custom endpoint doesn't exist, that's okay
-    }
-
-    // Fallback: Default to UTC
-    // Note: Set WORDPRESS_TIMEZONE environment variable to match WordPress admin timezone setting
-    // (Settings → General → Timezone in WordPress admin)
-    this.wpTimezone = 'UTC'
-    await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600)
-    return this.wpTimezone
-  }
-
   /**
    * Parse ACF datetime string in WordPress's timezone context
    * ACF returns datetime strings without timezone info, but they're in WordPress's local timezone
+   * Uses shared TimezoneService for DRY timezone handling
    */
   private async parseACFDateTime(dateTimeString: string): Promise<Date | null> {
-    try {
-      const wpTimezone = await this.getWordPressTimezone()
-      const dateTimeStr = dateTimeString.trim()
-
-      console.log(`[parseACFDateTime] Parsing: "${dateTimeStr}" in timezone: ${wpTimezone}`)
-
-      let parsedDate: Date
-
-      // Format: "Y-m-d H:i:s" (e.g., "2026-02-17 14:00:00")
-      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(dateTimeStr)) {
-        // Parse components manually to avoid timezone interpretation
-        const [datePart, timePart] = dateTimeStr.split(' ')
-        const [year, month, day] = datePart.split('-').map(Number)
-        const [hour, minute, second] = timePart.split(':').map(Number)
-        // Create a date object with these components (will be treated as local time)
-        // We'll use fromZonedTime to properly convert from WordPress timezone
-        parsedDate = new Date(year, month - 1, day, hour, minute, second)
-      }
-      // Format: "Y-m-d H:i" (e.g., "2026-02-17 14:00")
-      else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(dateTimeStr)) {
-        const [datePart, timePart] = dateTimeStr.split(' ')
-        const [year, month, day] = datePart.split('-').map(Number)
-        const [hour, minute] = timePart.split(':').map(Number)
-        parsedDate = new Date(year, month - 1, day, hour, minute, 0)
-      }
-      // Format: ISO 8601 with timezone (e.g., "2026-02-17T14:00:00+00:00")
-      else if (dateTimeStr.includes('T') || dateTimeStr.includes('Z') || dateTimeStr.includes('+') || dateTimeStr.includes('-')) {
-        // If it already has timezone info, parse directly
-        parsedDate = new Date(dateTimeStr)
-        // If it has timezone info, return it directly (already in correct timezone)
-        if (!isNaN(parsedDate.getTime())) {
-          return parsedDate
-        }
-      }
-      // Try default Date parsing as fallback
-      else {
-        parsedDate = new Date(dateTimeStr)
-      }
-
-      if (!parsedDate || isNaN(parsedDate.getTime())) {
-        console.warn(`Failed to parse ACF datetime: ${dateTimeString}`)
-        return null
-      }
-
-      // If WordPress timezone is UTC, we can use the date directly
-      if (wpTimezone === 'UTC' || wpTimezone === 'Etc/UTC') {
-        return parsedDate
-      }
-
-      // Convert from WordPress timezone to UTC
-      // fromZonedTime treats the Date object as if it represents a time in the specified timezone
-      // and converts it to UTC
-      const utcDate = fromZonedTime(parsedDate, wpTimezone)
-      console.log(`[parseACFDateTime] Converted "${dateTimeString}" (${wpTimezone}) → ${utcDate.toISOString()} (UTC)`)
-      return utcDate
-    } catch (error) {
-      console.error(`Error parsing ACF datetime "${dateTimeString}":`, error)
-      // Fallback to simple Date parsing
-      try {
-        return new Date(dateTimeString)
-      } catch {
-        return null
-      }
-    }
+    return this.timezoneService.parseDateTime(dateTimeString)
   }
 
   async getSiteSettings(): Promise<SiteSettings | null> {
@@ -545,6 +441,232 @@ export class WordpressService {
         isLive: false,
         kickUsername: null,
       }
+    }
+  }
+
+  /**
+   * Fetch game settings from WordPress ACF fields
+   * Looks for game settings in scl_site_settings post type (same as livestream settings)
+   */
+  async getGameSettings(): Promise<GameSettingsFromWordPress | null> {
+    console.log('[getGameSettings] Starting game settings fetch from WordPress...')
+    const cacheKey = 'wp:game_settings'
+    const cached = await this.cacheManager.get<GameSettingsFromWordPress>(cacheKey)
+    if (cached) {
+      console.log('[getGameSettings] Returning cached settings')
+      return cached
+    }
+    console.log('[getGameSettings] Cache miss, fetching from WordPress...')
+
+    try {
+      // Get the scl_site_settings post type (should only be 1 post)
+      const settingsResponse = await this.wpClient.get('/wp-json/wp/v2/scl_site_settings', {
+        params: {
+          per_page: 1,
+          _embed: true,
+        },
+      })
+
+      if (settingsResponse.data.length === 0) {
+        console.log('[getGameSettings] No scl_site_settings post found')
+        return null
+      }
+
+      const settingsPost = settingsResponse.data[0] as {
+        id: number
+        acf?: {
+          game_launch_date?: string
+          game_state?: string
+          weekly_reset_enabled?: boolean | string | number
+          weekly_reset_day?: number | string
+          weekly_reset_hour?: number | string
+          weekly_reset_minute?: number | string
+        }
+        meta?: {
+          game_launch_date?: string[]
+          game_state?: string[]
+          weekly_reset_enabled?: string[]
+          weekly_reset_day?: string[]
+          weekly_reset_hour?: string[]
+          weekly_reset_minute?: string[]
+        }
+      }
+
+      console.log(`[getGameSettings] Processing post ID: ${settingsPost.id}`)
+      console.log(`[getGameSettings] ACF data:`, JSON.stringify(settingsPost.acf, null, 2))
+
+      let gameSettings: GameSettingsFromWordPress = {
+        launchDate: null,
+        gameState: null,
+        weeklyResetEnabled: null,
+        weeklyResetDay: null,
+        weeklyResetHour: null,
+        weeklyResetMinute: null,
+      }
+
+      if (settingsPost.acf) {
+        console.log(`[getGameSettings] Using ACF fields`)
+        
+        // Parse launch date
+        if (settingsPost.acf.game_launch_date) {
+          gameSettings.launchDate = await this.parseACFDateTime(settingsPost.acf.game_launch_date)
+          console.log(`[getGameSettings] Parsed launch_date: ${settingsPost.acf.game_launch_date} → ${gameSettings.launchDate?.toISOString()}`)
+        }
+
+        // Parse game state (handle format like "ACTIVE: Active" or just "ACTIVE")
+        if (settingsPost.acf.game_state) {
+          const state = settingsPost.acf.game_state.toUpperCase()
+          // Extract the state value before colon if present (e.g., "ACTIVE: Active" -> "ACTIVE")
+          const stateValue = state.split(':')[0].trim()
+          if (['ACTIVE', 'IN_MAINTENANCE', 'DISABLED', 'HIDDEN'].includes(stateValue)) {
+            gameSettings.gameState = stateValue as 'ACTIVE' | 'IN_MAINTENANCE' | 'DISABLED' | 'HIDDEN'
+          }
+        }
+
+        // Parse weekly reset enabled
+        if (settingsPost.acf.weekly_reset_enabled !== undefined && settingsPost.acf.weekly_reset_enabled !== null) {
+          const value = settingsPost.acf.weekly_reset_enabled
+          gameSettings.weeklyResetEnabled = value === true || value === '1' || value === 1 || value === 'true'
+        }
+
+        // Parse weekly reset day (handle format like "0: Sunday" or just "0")
+        if (settingsPost.acf.weekly_reset_day !== undefined && settingsPost.acf.weekly_reset_day !== null) {
+          let day: number
+          if (typeof settingsPost.acf.weekly_reset_day === 'string') {
+            // Extract number before colon if present (e.g., "0: Sunday" -> "0")
+            const dayStr = settingsPost.acf.weekly_reset_day.split(':')[0].trim()
+            day = parseInt(dayStr, 10)
+          } else {
+            day = settingsPost.acf.weekly_reset_day
+          }
+          if (!isNaN(day) && day >= 0 && day <= 6) {
+            gameSettings.weeklyResetDay = day
+          }
+        }
+
+        // Parse weekly reset hour
+        if (settingsPost.acf.weekly_reset_hour !== undefined && settingsPost.acf.weekly_reset_hour !== null) {
+          const hour = typeof settingsPost.acf.weekly_reset_hour === 'string' 
+            ? parseInt(settingsPost.acf.weekly_reset_hour, 10) 
+            : settingsPost.acf.weekly_reset_hour
+          if (!isNaN(hour) && hour >= 0 && hour <= 23) {
+            gameSettings.weeklyResetHour = hour
+          }
+        }
+
+        // Parse weekly reset minute
+        if (settingsPost.acf.weekly_reset_minute !== undefined && settingsPost.acf.weekly_reset_minute !== null) {
+          const minute = typeof settingsPost.acf.weekly_reset_minute === 'string' 
+            ? parseInt(settingsPost.acf.weekly_reset_minute, 10) 
+            : settingsPost.acf.weekly_reset_minute
+          if (!isNaN(minute) && minute >= 0 && minute <= 59) {
+            gameSettings.weeklyResetMinute = minute
+          }
+        }
+      } else if (settingsPost.meta) {
+        console.log(`[getGameSettings] Using meta fields`)
+        
+        // Parse from meta fields (fallback)
+        if (settingsPost.meta.game_launch_date?.[0]) {
+          gameSettings.launchDate = await this.parseACFDateTime(settingsPost.meta.game_launch_date[0])
+        }
+        if (settingsPost.meta.game_state?.[0]) {
+          const state = settingsPost.meta.game_state[0].toUpperCase()
+          if (['ACTIVE', 'IN_MAINTENANCE', 'DISABLED', 'HIDDEN'].includes(state)) {
+            gameSettings.gameState = state as 'ACTIVE' | 'IN_MAINTENANCE' | 'DISABLED' | 'HIDDEN'
+          }
+        }
+        if (settingsPost.meta.weekly_reset_enabled?.[0]) {
+          gameSettings.weeklyResetEnabled = settingsPost.meta.weekly_reset_enabled[0] === '1' || settingsPost.meta.weekly_reset_enabled[0] === 'true'
+        }
+        if (settingsPost.meta.weekly_reset_day?.[0]) {
+          const day = parseInt(settingsPost.meta.weekly_reset_day[0], 10)
+          if (!isNaN(day) && day >= 0 && day <= 6) {
+            gameSettings.weeklyResetDay = day
+          }
+        }
+        if (settingsPost.meta.weekly_reset_hour?.[0]) {
+          const hour = parseInt(settingsPost.meta.weekly_reset_hour[0], 10)
+          if (!isNaN(hour) && hour >= 0 && hour <= 23) {
+            gameSettings.weeklyResetHour = hour
+          }
+        }
+        if (settingsPost.meta.weekly_reset_minute?.[0]) {
+          const minute = parseInt(settingsPost.meta.weekly_reset_minute[0], 10)
+          if (!isNaN(minute) && minute >= 0 && minute <= 59) {
+            gameSettings.weeklyResetMinute = minute
+          }
+        }
+      }
+
+      // If ACF not exposed OR if critical fields are missing, try ACF REST API
+      if ((!settingsPost.acf && !settingsPost.meta) || !gameSettings.launchDate) {
+        console.log(`[getGameSettings] ACF not exposed or launchDate missing, trying ACF REST API...`)
+        try {
+          const acfResponse = await this.wpClient.get(`/wp-json/acf/v3/scl_site_settings/${settingsPost.id}`)
+          if (acfResponse.data && acfResponse.data.acf) {
+            console.log(`[getGameSettings] ACF REST API data:`, JSON.stringify(acfResponse.data.acf, null, 2))
+            
+            // Only override if we got a value from ACF REST API
+            if (acfResponse.data.acf.game_launch_date && !gameSettings.launchDate) {
+              gameSettings.launchDate = await this.parseACFDateTime(acfResponse.data.acf.game_launch_date)
+              console.log(`[getGameSettings] Got launch_date from ACF REST API: ${acfResponse.data.acf.game_launch_date} → ${gameSettings.launchDate?.toISOString()}`)
+            }
+            if (acfResponse.data.acf.game_state) {
+              const state = acfResponse.data.acf.game_state.toUpperCase()
+              if (['ACTIVE', 'IN_MAINTENANCE', 'DISABLED', 'HIDDEN'].includes(state)) {
+                gameSettings.gameState = state as 'ACTIVE' | 'IN_MAINTENANCE' | 'DISABLED' | 'HIDDEN'
+              }
+            }
+            if (acfResponse.data.acf.weekly_reset_enabled !== undefined) {
+              const value = acfResponse.data.acf.weekly_reset_enabled
+              gameSettings.weeklyResetEnabled = value === true || value === '1' || value === 1 || value === 'true'
+            }
+            if (acfResponse.data.acf.weekly_reset_day !== undefined) {
+              const day = typeof acfResponse.data.acf.weekly_reset_day === 'string' 
+                ? parseInt(acfResponse.data.acf.weekly_reset_day, 10) 
+                : acfResponse.data.acf.weekly_reset_day
+              if (!isNaN(day) && day >= 0 && day <= 6) {
+                gameSettings.weeklyResetDay = day
+              }
+            }
+            if (acfResponse.data.acf.weekly_reset_hour !== undefined) {
+              const hour = typeof acfResponse.data.acf.weekly_reset_hour === 'string' 
+                ? parseInt(acfResponse.data.acf.weekly_reset_hour, 10) 
+                : acfResponse.data.acf.weekly_reset_hour
+              if (!isNaN(hour) && hour >= 0 && hour <= 23) {
+                gameSettings.weeklyResetHour = hour
+              }
+            }
+            if (acfResponse.data.acf.weekly_reset_minute !== undefined) {
+              const minute = typeof acfResponse.data.acf.weekly_reset_minute === 'string' 
+                ? parseInt(acfResponse.data.acf.weekly_reset_minute, 10) 
+                : acfResponse.data.acf.weekly_reset_minute
+              if (!isNaN(minute) && minute >= 0 && minute <= 59) {
+                gameSettings.weeklyResetMinute = minute
+              }
+            }
+          }
+        } catch (acfError) {
+          console.warn('[getGameSettings] ACF REST API not available:', acfError)
+        }
+      }
+
+      console.log(`[getGameSettings] Final parsed settings:`, {
+        launchDate: gameSettings.launchDate?.toISOString(),
+        gameState: gameSettings.gameState,
+        weeklyResetEnabled: gameSettings.weeklyResetEnabled,
+        weeklyResetDay: gameSettings.weeklyResetDay,
+        weeklyResetHour: gameSettings.weeklyResetHour,
+        weeklyResetMinute: gameSettings.weeklyResetMinute,
+      })
+
+      // Cache for 60 seconds (same as game settings cache)
+      await this.cacheManager.set(cacheKey, gameSettings, 60 * 1000)
+      return gameSettings
+    } catch (error) {
+      console.error('[getGameSettings] WordPress API error:', error)
+      return null
     }
   }
 }

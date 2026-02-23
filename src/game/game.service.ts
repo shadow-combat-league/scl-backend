@@ -6,13 +6,18 @@ import { Cache, Store } from 'cache-manager'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { PrismaService, PrismaClient } from '../prisma/prisma.service'
 import { MetricsService } from '../metrics/metrics.service'
+import { TimezoneService } from '../common/timezone.service'
+import { WordpressService } from '../wordpress/wordpress.service'
+import { fromZonedTime, toZonedTime } from 'date-fns-tz'
 import { SubmitScoreDto } from './dto/submit-score.dto'
 import { GetPlayerStatusDto } from './dto/get-player-status.dto'
 
 // Define types from Prisma client method return types
 type GameSession = Awaited<ReturnType<PrismaClient['gameSession']['create']>>
-type GameSettings = Awaited<ReturnType<PrismaClient['gameSettings']['findUnique']>>
 type Player = Awaited<ReturnType<PrismaClient['player']['findUnique']>>
+
+// Import merged GameSettings type (WordPress + DB)
+import { GameSettings, mergeGameSettings } from './types/game-settings.type'
 
 @Injectable()
 export class GameService implements OnModuleInit {
@@ -23,6 +28,8 @@ export class GameService implements OnModuleInit {
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
     private configService: ConfigService,
     private metricsService: MetricsService,
+    private timezoneService: TimezoneService,
+    private wordpressService: WordpressService,
   ) {
     // PrismaService extends PrismaClient, so we can safely assign it
     // This ensures TypeScript recognizes all PrismaClient methods
@@ -43,68 +50,105 @@ export class GameService implements OnModuleInit {
    * based on the configured game-day duration.
    *
    * In production, secondsPerDay is left unset so this collapses to real
-   * calendar days. In dev/testing, you can set secondsPerDay (e.g. 120)
-   * to simulate "2 minutes = 1 day" without changing game logic.
+   * calendar days using WordPress timezone (same as livestream system).
+   * In dev/testing, you can set secondsPerDay (e.g. 120) to simulate "2 minutes = 1 day"
+   * without changing game logic (uses UTC for simplicity in debug mode).
    */
-  private getGameDayInfo(settings: GameSettings) {
+  private async getGameDayInfo(settings: GameSettings) {
     const nowMs = Date.now()
 
-    const launchDate = new Date(settings.launchDate)
-    launchDate.setUTCHours(0, 0, 0, 0)
+    if (settings.secondsPerDay && settings.secondsPerDay > 0) {
+      // Debug mode: Use UTC-based virtual days (simpler for testing)
+      const launchDate = new Date(settings.launchDate)
+      launchDate.setUTCHours(0, 0, 0, 0)
+      const dayMs = this.getDayDurationMs(settings)
+      const launchMs = launchDate.getTime()
 
-    const dayMs = this.getDayDurationMs(settings)
-    const launchMs = launchDate.getTime()
+      const daysSinceLaunch = Math.max(0, Math.floor((nowMs - launchMs) / dayMs))
+      const todayMs = launchMs + daysSinceLaunch * dayMs
+      const yesterdayMs = todayMs - dayMs
+      const nextDayMs = todayMs + dayMs
 
-    const daysSinceLaunch = Math.max(0, Math.floor((nowMs - launchMs) / dayMs))
-    const todayMs = launchMs + daysSinceLaunch * dayMs
-    const yesterdayMs = todayMs - dayMs
-    const nextDayMs = todayMs + dayMs
+      return {
+        today: new Date(todayMs),
+        yesterday: new Date(yesterdayMs),
+        nextDayStart: new Date(nextDayMs),
+        daysSinceLaunch,
+        dayMs,
+        launchMs,
+      }
+    } else {
+      // Production mode: Use real calendar days with WordPress timezone
+      const now = new Date(nowMs)
+      
+      // Get start of today in WordPress timezone
+      const todayStart = await this.timezoneService.getStartOfDayInTimezone(now)
+      if (!todayStart) {
+        throw new Error('Failed to get start of today')
+      }
 
-    const today = new Date(todayMs)
-    const yesterday = new Date(yesterdayMs)
-    const nextDayStart = new Date(nextDayMs)
+      // Get launch date start of day in WordPress timezone
+      const launchStart = await this.timezoneService.getStartOfDayInTimezone(settings.launchDate)
+      if (!launchStart) {
+        throw new Error('Failed to get start of launch date')
+      }
 
-    return {
-      today,
-      yesterday,
-      nextDayStart,
-      daysSinceLaunch,
-      dayMs,
-      launchMs,
+      // Calculate days since launch
+      const dayMs = 24 * 60 * 60 * 1000
+      const daysSinceLaunch = Math.max(0, Math.floor((todayStart.getTime() - launchStart.getTime()) / dayMs))
+      
+      // Calculate yesterday and next day
+      const yesterdayStart = new Date(todayStart.getTime() - dayMs)
+      const nextDayStart = new Date(todayStart.getTime() + dayMs)
+
+      return {
+        today: todayStart,
+        yesterday: yesterdayStart,
+        nextDayStart,
+        daysSinceLaunch,
+        dayMs,
+        launchMs: launchStart.getTime(),
+      }
     }
   }
 
   /**
    * Normalize a date to its virtual day boundary based on the game settings.
    * This ensures date comparisons work correctly with secondsPerDay.
+   * Uses timezone-aware day boundaries in production mode.
    */
-  private normalizeToVirtualDay(date: Date, settings: GameSettings): Date {
-    const launchDate = new Date(settings.launchDate)
-    launchDate.setUTCHours(0, 0, 0, 0)
-    const dayMs = this.getDayDurationMs(settings)
-    const launchMs = launchDate.getTime()
-    
-    const daysSinceLaunch = Math.max(0, Math.floor((date.getTime() - launchMs) / dayMs))
-    const virtualDayMs = launchMs + daysSinceLaunch * dayMs
-    
-    return new Date(virtualDayMs)
+  private async normalizeToVirtualDay(date: Date, settings: GameSettings): Promise<Date> {
+    if (settings.secondsPerDay && settings.secondsPerDay > 0) {
+      // Debug mode: Use UTC-based virtual days
+      const launchDate = new Date(settings.launchDate)
+      launchDate.setUTCHours(0, 0, 0, 0)
+      const dayMs = this.getDayDurationMs(settings)
+      const launchMs = launchDate.getTime()
+      
+      const daysSinceLaunch = Math.max(0, Math.floor((date.getTime() - launchMs) / dayMs))
+      const virtualDayMs = launchMs + daysSinceLaunch * dayMs
+      
+      return new Date(virtualDayMs)
+    } else {
+      // Production mode: Normalize to start of day in WordPress timezone
+      const normalized = await this.timezoneService.getStartOfDayInTimezone(date)
+      return normalized || date
+    }
   }
 
   async getPlayerStatus(walletAddress: string): Promise<GetPlayerStatusDto> {
     try {
       const settings = await this.getSettings()
       const player = await this.findOrCreatePlayer(walletAddress)
-      const { today, yesterday, nextDayStart, daysSinceLaunch } = this.getGameDayInfo(settings)
+      const { today, yesterday, nextDayStart, daysSinceLaunch } = await this.getGameDayInfo(settings)
 
-    const launchDate = new Date(settings.launchDate)
-    launchDate.setUTCHours(0, 0, 0, 0)
     // Total lifetime plays allowed: 1 per day since launch (inclusive)
     const basePlaysAllowed = Math.max(1, daysSinceLaunch + 1)
 
     // Count all plays since launch (lifetime usage of tries)
     // Use virtual day boundary for comparison
     // IMPORTANT: Count plays FIRST, then get referral data to avoid race conditions
-    const normalizedLaunchDate = this.normalizeToVirtualDay(launchDate, settings)
+    const normalizedLaunchDate = await this.normalizeToVirtualDay(today, settings)
     const totalPlaysUsed = await this.prisma.gameSession.count({
       where: {
         playerId: player.id,
@@ -191,8 +235,8 @@ export class GameService implements OnModuleInit {
     // Check if player has a valid streak (played yesterday or this is their first ever play)
     // Normalize yesterday to virtual day boundary for comparison
     // Since playDate is stored as DATE, we query a range and then normalize to check virtual day boundaries
-    const normalizedYesterday = this.normalizeToVirtualDay(yesterday, settings)
-    const normalizedToday = this.normalizeToVirtualDay(today, settings)
+    const normalizedYesterday = await this.normalizeToVirtualDay(yesterday, settings)
+    const normalizedToday = await this.normalizeToVirtualDay(today, settings)
     
     // Query sessions in a date range that might include the virtual yesterday
     // We use a wider range to account for multiple virtual days on the same calendar date
@@ -213,13 +257,12 @@ export class GameService implements OnModuleInit {
     
     // Filter to only sessions that actually fall in the virtual yesterday
     // When playDate is stored, it's stored as the virtual day boundary (today), so we can compare directly
-    const playedYesterday = recentSessions.find(session => {
+    const playedYesterday = await Promise.all(recentSessions.map(async session => {
       // playDate is stored as DATE, so we need to create a Date object and normalize it
       const sessionDate = new Date(session.playDate)
-      sessionDate.setUTCHours(0, 0, 0, 0)
-      const normalizedSessionDate = this.normalizeToVirtualDay(sessionDate, settings)
-      return normalizedSessionDate.getTime() === normalizedYesterday.getTime()
-    })
+      const normalizedSessionDate = await this.normalizeToVirtualDay(sessionDate, settings)
+      return normalizedSessionDate.getTime() === normalizedYesterday.getTime() ? session : null
+    })).then(results => results.find(r => r !== null))
 
     const hasValidStreak = playedYesterday !== null || player.lastPlayDate === null
 
@@ -238,7 +281,7 @@ export class GameService implements OnModuleInit {
     // Check if they've already played today - if so, use current streak
     // Otherwise, calculate what streak they would get if they play now
     const lastPlay = player.lastPlayDate ? new Date(player.lastPlayDate) : null
-    const normalizedLastPlay = lastPlay ? this.normalizeToVirtualDay(lastPlay, settings) : null
+    const normalizedLastPlay = lastPlay ? await this.normalizeToVirtualDay(lastPlay, settings) : null
     // normalizedToday is already declared above (line 130), reuse it
     
     // Check if this would be their first play today
@@ -290,8 +333,8 @@ export class GameService implements OnModuleInit {
       // Calculate which virtual day the last play was on
       let lastPlayVirtualDay: number | null = null
       if (player.lastPlayDate) {
-        const normalizedLastPlay = this.normalizeToVirtualDay(new Date(player.lastPlayDate), settings)
-        const launchMs = new Date(settings.launchDate).setUTCHours(0, 0, 0, 0)
+        const normalizedLastPlay = await this.normalizeToVirtualDay(new Date(player.lastPlayDate), settings)
+        const launchMs = (await this.getGameDayInfo(settings)).launchMs
         lastPlayVirtualDay = Math.floor((normalizedLastPlay.getTime() - launchMs) / dayMs)
       }
 
@@ -314,7 +357,7 @@ export class GameService implements OnModuleInit {
 
       // Add week number if weekly resets are enabled
       if (settings.weeklyResetEnabled) {
-        debugInfo.currentWeekNumber = this.calculateWeekNumber(settings, today)
+        debugInfo.currentWeekNumber = await this.calculateWeekNumber(settings, today)
       }
 
       result.debugInfo = debugInfo
@@ -349,7 +392,7 @@ export class GameService implements OnModuleInit {
     try {
       const settings = await this.getSettings()
       const player = await this.findOrCreatePlayer(dto.walletAddress)
-      const { today, yesterday } = this.getGameDayInfo(settings)
+      const { today, yesterday } = await this.getGameDayInfo(settings)
 
       // Check if player has any plays remaining (lifetime since launch)
       const status = await this.getPlayerStatus(dto.walletAddress)
@@ -361,8 +404,8 @@ export class GameService implements OnModuleInit {
     // Check/update streak – only the first play of each day can affect streak
     // Normalize lastPlay to virtual day boundary for proper comparison
     const lastPlay = player.lastPlayDate ? new Date(player.lastPlayDate) : null
-    const normalizedLastPlay = lastPlay ? this.normalizeToVirtualDay(lastPlay, settings) : null
-    const normalizedYesterday = this.normalizeToVirtualDay(yesterday, settings)
+    const normalizedLastPlay = lastPlay ? await this.normalizeToVirtualDay(lastPlay, settings) : null
+    const normalizedYesterday = await this.normalizeToVirtualDay(yesterday, settings)
 
     // Only update streak if this is the first play today
     const isFirstPlayToday = !normalizedLastPlay || normalizedLastPlay.getTime() < today.getTime()
@@ -461,7 +504,7 @@ export class GameService implements OnModuleInit {
     })
 
     // Calculate week number for this session
-    const weekNumber = settings.weeklyResetEnabled ? this.calculateWeekNumber(settings, today) : null
+    const weekNumber = settings.weeklyResetEnabled ? await this.calculateWeekNumber(settings, today) : null
 
     // Check if this play should use a referral play
     const referral = await this.prisma.referralCode.findUnique({
@@ -710,7 +753,7 @@ export class GameService implements OnModuleInit {
     // Calculate next reset time if weekly resets are enabled
     let nextResetTime: string | null = null
     if (useWeeklyScores) {
-      nextResetTime = this.calculateNextResetTime(settings).toISOString()
+      nextResetTime = (await this.calculateNextResetTime(settings)).toISOString()
     }
 
     const result = {
@@ -844,13 +887,16 @@ export class GameService implements OnModuleInit {
   /**
    * Calculate the next reset time based on weekly reset settings.
    * Returns the date/time when the next weekly reset will occur.
+   * Uses WordPress timezone for production mode (same as livestream system).
    */
-  private calculateNextResetTime(settings: GameSettings): Date {
+  private async calculateNextResetTime(settings: GameSettings): Promise<Date> {
     const now = new Date(Date.now())
     const resetDay = settings.weeklyResetDay ?? 0 // 0 = Sunday, 1 = Monday, etc.
+    const resetHour = settings.weeklyResetHour ?? 1 // Default to 1 AM
+    const resetMinute = settings.weeklyResetMinute ?? 0
     
     if (settings.secondsPerDay && settings.secondsPerDay > 0) {
-      // Debug mode: Use virtual weeks
+      // Debug mode: Use virtual weeks (keep UTC-based for simplicity)
       const dayMs = this.getDayDurationMs(settings)
       const launchDate = new Date(settings.launchDate)
       launchDate.setUTCHours(0, 0, 0, 0)
@@ -862,24 +908,38 @@ export class GameService implements OnModuleInit {
       
       return new Date(nextWeekStart)
     } else {
-      // Production mode: Use real calendar weeks
-      // Use UTC methods to avoid timezone issues
-      const currentDay = now.getUTCDay()
-      const currentHour = now.getUTCHours()
+      // Production mode: Use real calendar weeks with timezone-aware calculations
+      const wpTimezone = await this.timezoneService.getWordPressTimezone()
+      
+      // Get current date/time in WordPress timezone
+      const nowZoned = toZonedTime(now, wpTimezone)
+      const currentDay = nowZoned.getDay() // 0 = Sunday, 1 = Monday, etc.
+      const currentHour = nowZoned.getHours()
+      const currentMinute = nowZoned.getMinutes()
+      
       let daysUntilReset = (resetDay - currentDay + 7) % 7
       
-      // If it's the reset day but before 1 AM UTC, reset is today
-      if (daysUntilReset === 0 && currentHour >= 1) {
-        // Already past reset time today, next reset is next week
-        daysUntilReset = 7
-      } else if (daysUntilReset === 0 && currentHour < 1) {
-        // Reset is today but hasn't happened yet
-        daysUntilReset = 0
+      // If it's the reset day, check if we're before or after reset time
+      if (daysUntilReset === 0) {
+        const resetTimeMinutes = resetHour * 60 + resetMinute
+        const currentTimeMinutes = currentHour * 60 + currentMinute
+        
+        if (currentTimeMinutes >= resetTimeMinutes) {
+          // Already past reset time today, next reset is next week
+          daysUntilReset = 7
+        } else {
+          // Reset is today but hasn't happened yet
+          daysUntilReset = 0
+        }
       }
       
-      const nextReset = new Date(now)
-      nextReset.setUTCDate(now.getUTCDate() + daysUntilReset)
-      nextReset.setUTCHours(1, 0, 0, 0) // Reset at 1 AM UTC
+      // Calculate next reset date in WordPress timezone
+      const nextResetTzDate = new Date(nowZoned)
+      nextResetTzDate.setDate(nowZoned.getDate() + daysUntilReset)
+      nextResetTzDate.setHours(resetHour, resetMinute, 0, 0)
+      
+      // Convert from WordPress timezone to UTC
+      const nextReset = fromZonedTime(nextResetTzDate, wpTimezone)
       
       return nextReset
     }
@@ -889,44 +949,68 @@ export class GameService implements OnModuleInit {
    * Calculate the week number for a given date.
    * Week 0 is the first week (launch week).
    * In debug mode, uses virtual weeks based on secondsPerDay.
+   * Uses WordPress timezone for production mode (same as livestream system).
    */
-  private calculateWeekNumber(settings: GameSettings, date: Date): number {
-    const launchDate = new Date(settings.launchDate)
-    launchDate.setUTCHours(0, 0, 0, 0)
-    
+  private async calculateWeekNumber(settings: GameSettings, date: Date): Promise<number> {
     if (settings.secondsPerDay && settings.secondsPerDay > 0) {
-      // Debug mode: Use virtual weeks
+      // Debug mode: Use virtual weeks (UTC-based)
+      const launchDate = new Date(settings.launchDate)
+      launchDate.setUTCHours(0, 0, 0, 0)
       const dayMs = this.getDayDurationMs(settings)
       const launchMs = launchDate.getTime()
       const daysSinceLaunch = Math.floor((date.getTime() - launchMs) / dayMs)
       return Math.floor(daysSinceLaunch / 7)
     } else {
-      // Production mode: Use real calendar weeks
-      const resetDay = settings.weeklyResetDay ?? 0 // 0 = Sunday, 1 = Monday, etc.
+      // Production mode: Use real calendar weeks with timezone
+      const wpTimezone = await this.timezoneService.getWordPressTimezone()
+      const resetDay = settings.weeklyResetDay ?? 0
+      const resetHour = settings.weeklyResetHour ?? 1
+      const resetMinute = settings.weeklyResetMinute ?? 0
       
-      // Normalize launch date to the start of its week (based on resetDay)
-      const launchDay = launchDate.getUTCDay()
+      // Get start of day in WordPress timezone for both dates
+      const launchDateTz = await this.timezoneService.getStartOfDayInTimezone(settings.launchDate)
+      if (!launchDateTz) {
+        throw new Error('Failed to parse launch date')
+      }
+      
+      const dateTz = await this.timezoneService.getStartOfDayInTimezone(date)
+      if (!dateTz) {
+        throw new Error('Failed to parse date')
+      }
+      
+      // Convert to zoned time to get day of week in WordPress timezone
+      const launchZoned = toZonedTime(launchDateTz, wpTimezone)
+      const dateZoned = toZonedTime(dateTz, wpTimezone)
+      
+      const launchDay = launchZoned.getDay()
+      const currentDay = dateZoned.getDay()
+      const currentHour = dateZoned.getHours()
+      const currentMinute = dateZoned.getMinutes()
+      
+      // Normalize launch date to start of its week
       let launchDaysToSubtract = (launchDay - resetDay + 7) % 7
-      const launchWeekStart = new Date(launchDate)
-      launchWeekStart.setUTCDate(launchDate.getUTCDate() - launchDaysToSubtract)
-      launchWeekStart.setUTCHours(0, 0, 0, 0)
+      const launchWeekStartDate = new Date(launchZoned)
+      launchWeekStartDate.setDate(launchZoned.getDate() - launchDaysToSubtract)
+      launchWeekStartDate.setHours(0, 0, 0, 0)
+      const launchWeekStart = fromZonedTime(launchWeekStartDate, wpTimezone)
       
-      // Find the start of the week for this date (based on resetDay)
-      // Use UTC methods to avoid timezone issues
-      const dateDay = date.getUTCDay()
-      const dateHour = date.getUTCHours()
-      let daysToSubtract = (dateDay - resetDay + 7) % 7
-      if (daysToSubtract === 0 && dateHour < 1) {
-        // If it's the reset day but before 1 AM UTC, go back to previous week
+      // Find start of current week
+      let daysToSubtract = (currentDay - resetDay + 7) % 7
+      const resetTimeMinutes = resetHour * 60 + resetMinute
+      const currentTimeMinutes = currentHour * 60 + currentMinute
+      
+      if (daysToSubtract === 0 && currentTimeMinutes < resetTimeMinutes) {
+        // If it's reset day but before reset time, go back to previous week
         daysToSubtract = 7
       }
       
-      const weekStart = new Date(date)
-      weekStart.setUTCDate(date.getUTCDate() - daysToSubtract)
-      weekStart.setUTCHours(0, 0, 0, 0)
+      const weekStartDate = new Date(dateZoned)
+      weekStartDate.setDate(dateZoned.getDate() - daysToSubtract)
+      weekStartDate.setHours(0, 0, 0, 0)
+      const weekStart = fromZonedTime(weekStartDate, wpTimezone)
       
-      // Calculate week number: weeks since launch week start
-      const weekMs = 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+      // Calculate week number
+      const weekMs = 7 * 24 * 60 * 60 * 1000
       const weeksSinceLaunch = Math.floor((weekStart.getTime() - launchWeekStart.getTime()) / weekMs)
       
       return Math.max(0, weeksSinceLaunch)
@@ -934,8 +1018,8 @@ export class GameService implements OnModuleInit {
   }
 
   /**
-   * Load or bootstrap the single GameSettings row.
-   * This lets you tweak launchDate and multipliers without code changes.
+   * Load game settings from WordPress (single source of truth).
+   * Merges WordPress settings with DB-only fields (streak multipliers, etc.).
    * Settings are cached for 60 seconds to allow quick testing of changes.
    */
   async getSettings(): Promise<GameSettings> {
@@ -953,91 +1037,59 @@ export class GameService implements OnModuleInit {
       
       console.log(`[Cache] Checking cache for ${cacheKey}:`, cached ? 'HIT' : 'MISS')
       
-      // Check if cached settings are still valid by comparing updatedAt
       if (cached) {
         this.metricsService.cacheHits.inc({ cache_key_pattern: 'game:settings' })
-        const dbSettings = await this.prisma.gameSettings.findUnique({ 
-          where: { id: 1 },
-          select: { updatedAt: true }
-        })
-        // If settings were updated in DB, invalidate cache
-        if (dbSettings && dbSettings.updatedAt > cached.updatedAt) {
-          console.log(`[Cache] Invalidating cache - DB settings newer`)
-          await this.cacheManager.del(cacheKey)
-        } else {
-          console.log(`[Cache] Returning cached settings`)
-          return cached
-        }
+        console.log(`[Cache] Returning cached settings`)
+        return cached
       } else {
         this.metricsService.cacheMisses.inc({ cache_key_pattern: 'game:settings' })
       }
     } catch (error) {
       console.error(`[Cache] Error accessing cache:`, error)
       this.metricsService.redisErrors.inc({ error_type: 'cache_read_error' })
-      // Continue to load from DB if cache fails
+      // Continue to load from WordPress if cache fails
     }
 
-    let settings = await this.prisma.gameSettings.findUnique({ where: { id: 1 } })
-    if (!settings) {
-      // Bootstrap default settings if none exist yet
-      // Use GAME_LAUNCH_DATE from env if provided, otherwise use current date
-      const launchDateEnv = this.configService.get<string>('GAME_LAUNCH_DATE')
-      let launchDate: Date
-      if (launchDateEnv) {
-        launchDate = new Date(launchDateEnv)
-        launchDate.setUTCHours(0, 0, 0, 0)
-      } else {
-        launchDate = new Date()
-        launchDate.setUTCHours(0, 0, 0, 0)
-      }
-      
-      // Use upsert to handle race conditions and ensure defaults are set
-      settings = await this.prisma.gameSettings.upsert({
-        where: { id: 1 },
-        update: {
-          // If it exists but was missing fields, update with defaults
-          weeklyResetEnabled: false,
-          weeklyResetDay: 0,
-          currentWeekNumber: null,
-        },
-        create: {
+    // Fetch from WordPress (single source of truth)
+    console.log('[getSettings] Fetching game settings from WordPress...')
+    const wpSettings = await this.wordpressService.getGameSettings()
+    
+    if (!wpSettings || !wpSettings.launchDate) {
+      throw new Error('WordPress game settings are required. Please configure game_launch_date in WordPress ACF.')
+    }
+
+    // Get DB-only fields (streak multipliers, etc.)
+    let dbSettings = await this.prisma.gameSettings.findUnique({ where: { id: 1 } })
+    
+    // Create DB row if it doesn't exist (for DB-only fields)
+    if (!dbSettings) {
+      // Use create directly since we know it doesn't exist
+      dbSettings = await this.prisma.gameSettings.create({
+        data: {
           id: 1,
-          launchDate,
-          gameState: 'ACTIVE',
           streakBaseMultiplier: 1.0,
           streakIncrementPerDay: 0.1,
-          weeklyResetEnabled: false,
-          weeklyResetDay: 0, // Sunday
+          secondsPerDay: null,
           currentWeekNumber: null,
           referralExtraPlays: 3,
-          createdAt: new Date(),
-          updatedAt: new Date(),
         },
       })
-      console.log(`✅ GameSettings initialized with launchDate: ${launchDate.toISOString()}`)
-    } else {
-      // Ensure new fields have defaults if they're null (for existing rows before migration)
-      const needsUpdate = 
-        settings.weeklyResetEnabled === undefined || 
-        settings.weeklyResetDay === undefined ||
-        settings.currentWeekNumber === undefined ||
-        settings.gameState === undefined ||
-        settings.referralExtraPlays === undefined
-      
-      if (needsUpdate) {
-        settings = await this.prisma.gameSettings.update({
-          where: { id: 1 },
-          data: {
-            weeklyResetEnabled: settings.weeklyResetEnabled ?? false,
-            weeklyResetDay: settings.weeklyResetDay ?? 0,
-            currentWeekNumber: settings.currentWeekNumber ?? null,
-            gameState: settings.gameState ?? 'ACTIVE',
-            referralExtraPlays: settings.referralExtraPlays ?? 3,
-          },
-        })
-        console.log(`✅ GameSettings updated with defaults`)
-      }
+      console.log(`✅ GameSettings DB row initialized (DB-only fields)`)
     }
+
+    // Merge WordPress (source of truth) + DB-only fields
+    const mergedSettings = mergeGameSettings(wpSettings, dbSettings)
+    
+    console.log(`[getSettings] ✅ Merged settings:`, {
+      launchDate: mergedSettings.launchDate?.toISOString(),
+      gameState: mergedSettings.gameState,
+      weeklyResetEnabled: mergedSettings.weeklyResetEnabled,
+      weeklyResetDay: mergedSettings.weeklyResetDay,
+      weeklyResetHour: mergedSettings.weeklyResetHour,
+      weeklyResetMinute: mergedSettings.weeklyResetMinute,
+      streakBaseMultiplier: mergedSettings.streakBaseMultiplier,
+      referralExtraPlays: mergedSettings.referralExtraPlays,
+    })
 
     // Cache for 60 seconds (cache-manager expects TTL in milliseconds)
     try {
@@ -1046,7 +1098,7 @@ export class GameService implements OnModuleInit {
       
       // Store in cache - cache-manager will pass TTL in milliseconds to the store
       const cacheSetStart = Date.now()
-      await this.cacheManager.set(cacheKey, settings, ttlMs)
+      await this.cacheManager.set(cacheKey, mergedSettings, ttlMs)
       const cacheSetDuration = (Date.now() - cacheSetStart) / 1000
       this.metricsService.cacheOperations.observe(
         { operation: 'set', cache_key_pattern: 'game:settings' },
@@ -1071,7 +1123,7 @@ export class GameService implements OnModuleInit {
       
       // Verify via cache manager
       const verifyCache = await this.cacheManager.get<GameSettings>(cacheKey)
-      if (verifyCache && verifyCache.id === settings.id) {
+      if (verifyCache && verifyCache.id === mergedSettings.id) {
         console.log(`[Cache] ✅ Verified cache write via cache manager - key exists`)
       } else {
         console.error(`[Cache] ❌ WARNING: Cache write verification failed! This might be using in-memory cache.`)
@@ -1084,7 +1136,7 @@ export class GameService implements OnModuleInit {
       throw new Error(`Cache write failed: ${error.message}. Cannot proceed without Redis cache.`)
     }
     
-    return settings
+    return mergedSettings
   }
 
   /**
