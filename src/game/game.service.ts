@@ -272,6 +272,31 @@ export class GameService implements OnModuleInit {
     const storedStreak = useWeeklyScores ? (player.weeklyStreak ?? 0) : player.currentStreak
     const displayLongestStreak = useWeeklyScores ? (player.weeklyLongestStreak ?? 0) : player.longestStreak
 
+    // Calculate what multiplier you would get if you played right now
+    // This ensures the status multiplier matches what you'll actually get when you submit
+    let projectedMultiplierStreak = storedStreak
+    const lastPlay = player.lastPlayDate ? new Date(player.lastPlayDate) : null
+    const normalizedLastPlay = lastPlay ? await this.normalizeToVirtualDay(lastPlay, settings) : null
+    
+    // Check if this would be your first play today
+    const wouldBeFirstPlayToday = !normalizedLastPlay || normalizedLastPlay.getTime() < normalizedToday.getTime()
+    
+    if (wouldBeFirstPlayToday) {
+      if (!normalizedLastPlay) {
+        // First ever play - multiplier is base (1.0x)
+        projectedMultiplierStreak = 0
+      } else if (normalizedLastPlay.getTime() === normalizedYesterday.getTime()) {
+        // Consecutive day - you'll get multiplier based on your current streak (day you're on)
+        projectedMultiplierStreak = storedStreak // This represents "day you're on" for multiplier
+      } else {
+        // Gap in days - streak resets, multiplier is base (1.0x)
+        projectedMultiplierStreak = 0
+      }
+    } else {
+      // Already played today - multiplier is based on your current streak (what you have)
+      projectedMultiplierStreak = storedStreak
+    }
+
     const result: GetPlayerStatusDto = {
       walletAddress: player.walletAddress,
       totalScore: displayScore,
@@ -283,8 +308,9 @@ export class GameService implements OnModuleInit {
       longestStreak: displayLongestStreak,
       playsRemaining,
       canPlay: playsRemaining > 0,
-      // Multiplier is now also based on the real streak value.
-      streakMultiplier: this.calculateStreakMultiplier(settings, storedStreak),
+      // Multiplier shows what you'll get if you play right now (or what you have if already played today)
+      // Use isForScoreSubmission=true to match the calculation used during score submission
+      streakMultiplier: this.calculateStreakMultiplier(settings, projectedMultiplierStreak, wouldBeFirstPlayToday),
       hasValidStreak,
       nextAvailableAt,
       secondsToNextPlay,
@@ -398,8 +424,9 @@ export class GameService implements OnModuleInit {
         streakForMultiplier = 0 // Results in base multiplier
       } else if (normalizedLastPlay.getTime() === normalizedYesterday.getTime()) {
         // Consecutive day → streak continues
-        // Multiplier is based on streak BEFORE incrementing (what they had)
-        streakForMultiplier = currentStreak
+        // Multiplier is based on the day you're on (current streak + 1)
+        // So if you had streak 1, you're now on day 2, which should get 1.1x
+        streakForMultiplier = currentStreak // This represents "day you're on" for multiplier calculation
         newStreak = currentStreak + 1
         newLifetimeStreak = player.currentStreak + 1
       } else {
@@ -452,7 +479,8 @@ export class GameService implements OnModuleInit {
     // Calculate final score with streak multiplier
     // IMPORTANT: Use streakForMultiplier which accounts for gaps (resets to base multiplier if gap)
     // The multiplier should reflect what the player had when they played, not after
-    const streakMultiplier = this.calculateStreakMultiplier(settings, streakForMultiplier)
+    // Pass isForScoreSubmission=true so streak 1 = day 2 (1.1x), not day 1 (1.0x)
+    const streakMultiplier = this.calculateStreakMultiplier(settings, streakForMultiplier, true)
     const finalScore = Math.floor(dto.score * streakMultiplier)
 
     // Track metrics
@@ -845,18 +873,34 @@ export class GameService implements OnModuleInit {
     return player
   }
 
-  private calculateStreakMultiplier(settings: GameSettings, streak: number): number {
+  private calculateStreakMultiplier(settings: GameSettings, streak: number, isForScoreSubmission = false): number {
     // Multiplier rules:
-    // - First day (streak <= 0) → base multiplier (e.g. 1.0x)
-    // - Second day onward → base + streak * increment (so day 2 already gets a bonus)
+    // During score submission: streak represents "day you're on"
+    //   - Day 1 (streak = 0) → 1.0x
+    //   - Day 2 (streak = 1) → 1.1x
+    //   - Day 3 (streak = 2) → 1.2x, etc.
+    // For leaderboard/status: streak represents "days completed"
+    //   - Streak 0 = never played → 1.0x
+    //   - Streak 1 = completed 1 day → 1.0x (still on first day)
+    //   - Streak 2 = completed 2 days → 1.1x (on second day)
+    //   - Streak 3 = completed 3 days → 1.2x, etc.
     // - Hard cap at 2.0x to avoid unbounded growth
-    if (streak <= 0) {
-      return settings.streakBaseMultiplier
+    
+    if (isForScoreSubmission) {
+      // During submission: streak 0 = day 1, streak 1 = day 2, etc.
+      if (streak <= 0) {
+        return settings.streakBaseMultiplier
+      }
+      const raw = settings.streakBaseMultiplier + streak * settings.streakIncrementPerDay
+      return Math.min(raw, 2.0)
+    } else {
+      // For display: streak 1 = completed 1 day (still day 1), streak 2 = completed 2 days (day 2), etc.
+      if (streak <= 1) {
+        return settings.streakBaseMultiplier
+      }
+      const raw = settings.streakBaseMultiplier + (streak - 1) * settings.streakIncrementPerDay
+      return Math.min(raw, 2.0)
     }
-
-    const raw = settings.streakBaseMultiplier + streak * settings.streakIncrementPerDay
-    const capped = Math.min(raw, 2.0)
-    return capped
   }
 
   /**
