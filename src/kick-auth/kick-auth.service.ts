@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import axios from 'axios'
+import { MetricsService } from '../metrics/metrics.service'
 
 @Injectable()
 export class KickAuthService {
   private readonly logger = new Logger(KickAuthService.name)
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly metricsService: MetricsService,
+  ) {}
 
   async exchangeCodeForToken(params: {
     code: string
@@ -57,6 +61,7 @@ export class KickAuthService {
       }
 
       this.logger.log(`Access token received (length: ${accessToken.length})`)
+      this.metricsService.kickOAuthExchanges.inc({ status: 'success' })
 
       return { access_token: accessToken }
     } catch (error: any) {
@@ -66,6 +71,7 @@ export class KickAuthService {
         `Error exchanging code for token with Kick (status ${status ?? 'unknown'})`,
         JSON.stringify(data ?? error?.message ?? 'unknown'),
       )
+      this.metricsService.kickOAuthExchanges.inc({ status: 'error' })
       throw new Error('Failed to exchange code for Kick access token')
     }
   }

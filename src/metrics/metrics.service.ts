@@ -30,6 +30,15 @@ export class MetricsService implements OnModuleInit {
   public readonly redisOperations: Histogram<string>
   public readonly redisErrors: Counter<string>
 
+  // Livestream / Kick Metrics
+  public readonly kickChatConnections: Gauge<string>
+  public readonly kickChatMessagesTotal: Counter<string>
+  public readonly kickWebSocketClients: Gauge<string>
+  public readonly kickWebSocketConnections: Counter<string>
+  public readonly kickWebSocketDisconnections: Counter<string>
+  public readonly kickWebSocketSubscriptions: Counter<string>
+  public readonly kickOAuthExchanges: Counter<string>
+
   constructor() {
     // Create a new registry
     this.register = new Registry()
@@ -147,6 +156,52 @@ export class MetricsService implements OnModuleInit {
       name: 'redis_errors_total',
       help: 'Total number of Redis errors',
       labelNames: ['error_type'],
+      registers: [this.register],
+    })
+
+    // Livestream / Kick Metrics
+    this.kickChatConnections = new Gauge({
+      name: 'kick_chat_connections_active',
+      help: 'Number of active Kick channel connections (server → Kick)',
+      registers: [this.register],
+    })
+
+    this.kickChatMessagesTotal = new Counter({
+      name: 'kick_chat_messages_total',
+      help: 'Total number of chat messages received from Kick',
+      labelNames: ['channel'],
+      registers: [this.register],
+    })
+
+    this.kickWebSocketClients = new Gauge({
+      name: 'kick_websocket_clients_active',
+      help: 'Number of frontend WebSocket clients currently connected',
+      registers: [this.register],
+    })
+
+    this.kickWebSocketConnections = new Counter({
+      name: 'kick_websocket_connections_total',
+      help: 'Total number of frontend WebSocket client connections',
+      registers: [this.register],
+    })
+
+    this.kickWebSocketDisconnections = new Counter({
+      name: 'kick_websocket_disconnections_total',
+      help: 'Total number of frontend WebSocket client disconnections',
+      registers: [this.register],
+    })
+
+    this.kickWebSocketSubscriptions = new Counter({
+      name: 'kick_websocket_subscriptions_total',
+      help: 'Total number of channel subscription events from frontend clients',
+      labelNames: ['channel'],
+      registers: [this.register],
+    })
+
+    this.kickOAuthExchanges = new Counter({
+      name: 'kick_oauth_token_exchanges_total',
+      help: 'Total number of Kick OAuth token exchange attempts',
+      labelNames: ['status'],
       registers: [this.register],
     })
   }

@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy, Logger } from '@nestjs/common'
 import { createClient, type MessageData } from '@retconned/kick-js'
 import { EventEmitter2 } from '@nestjs/event-emitter'
+import { MetricsService } from '../metrics/metrics.service'
 
 export interface KickChatMessage {
   username: string
@@ -19,7 +20,10 @@ export class KickChatService implements OnModuleDestroy {
   private clients: Map<string, ReturnType<typeof createClient>> = new Map()
   private messageHandlers: Map<string, Set<(message: KickChatMessage) => void>> = new Map()
 
-  constructor(private readonly eventEmitter: EventEmitter2) {}
+  constructor(
+    private readonly eventEmitter: EventEmitter2,
+    private readonly metricsService: MetricsService,
+  ) {}
 
   /**
    * Connect to a Kick channel's chat
@@ -59,6 +63,7 @@ export class KickChatService implements OnModuleDestroy {
 
       // Store the client
       this.clients.set(channelName, client)
+      this.metricsService.kickChatConnections.inc()
 
       return true
     } catch (error) {
@@ -92,6 +97,8 @@ export class KickChatService implements OnModuleDestroy {
         badges,
       }
 
+      this.metricsService.kickChatMessagesTotal.inc({ channel: channelName })
+
       // Emit to EventEmitter for WebSocket gateway
       this.eventEmitter.emit('kick-chat.message', { channelName, message: chatMessage })
 
@@ -114,6 +121,7 @@ export class KickChatService implements OnModuleDestroy {
       // kick-js doesn't have explicit disconnect, but we can remove the reference
       this.clients.delete(channelName)
       this.messageHandlers.delete(channelName)
+      this.metricsService.kickChatConnections.dec()
       this.logger.log(`Disconnected from channel: ${channelName}`)
     }
   }

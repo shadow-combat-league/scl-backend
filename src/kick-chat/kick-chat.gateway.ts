@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io'
 import { Logger, OnModuleInit } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { KickChatService } from './kick-chat.service'
+import { MetricsService } from '../metrics/metrics.service'
 
 @WebSocketGateway({
   cors: {
@@ -28,6 +29,7 @@ export class KickChatGateway implements OnGatewayConnection, OnGatewayDisconnect
   constructor(
     private readonly kickChatService: KickChatService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly metricsService: MetricsService,
   ) {}
 
   onModuleInit() {
@@ -50,9 +52,13 @@ export class KickChatGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`)
+    this.metricsService.kickWebSocketClients.inc()
+    this.metricsService.kickWebSocketConnections.inc()
   }
 
   handleDisconnect(client: Socket) {
+    this.metricsService.kickWebSocketClients.dec()
+    this.metricsService.kickWebSocketDisconnections.inc()
     const channelName = this.clientChannels.get(client.id)
     if (channelName) {
       this.logger.log(`Client ${client.id} disconnected from channel: ${channelName}`)
@@ -87,6 +93,7 @@ export class KickChatGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       this.clientChannels.set(client.id, channelName)
       client.join(`channel:${channelName}`)
+      this.metricsService.kickWebSocketSubscriptions.inc({ channel: channelName })
       client.emit('subscribed', { channelName })
 
       this.logger.log(`Client ${client.id} successfully subscribed to channel: ${channelName}`)
