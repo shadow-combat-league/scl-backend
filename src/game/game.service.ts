@@ -483,11 +483,13 @@ export class GameService implements OnModuleInit {
       newStreak = currentStreak
     }
 
-    // Calculate final score with streak multiplier
-    // IMPORTANT: Use streakForMultiplier which accounts for gaps (resets to base multiplier if gap)
-    // The multiplier should reflect what the player had when they played, not after
-    // Pass isForScoreSubmission=true so streak 1 = day 2 (1.1x), not day 1 (1.0x)
-    const streakMultiplier = this.calculateStreakMultiplier(settings, streakForMultiplier, true)
+    // Calculate final score with streak multiplier.
+    // - First play today: use isForScoreSubmission=true so streakForMultiplier 0=day1(1.0x), 1=day2(1.1x), etc.
+    // - Subsequent same-day plays: use isForScoreSubmission=false with currentStreak so streak 1=1.0x, 2=1.1x, etc.
+    //   This prevents same-day second plays from incorrectly receiving a day-2 bonus.
+    const streakMultiplier = isFirstPlayToday
+      ? this.calculateStreakMultiplier(settings, streakForMultiplier, true)
+      : this.calculateStreakMultiplier(settings, currentStreak, false)
     const finalScore = Math.floor(dto.score * streakMultiplier)
 
     // Track metrics
