@@ -846,8 +846,17 @@ export class GameService implements OnModuleInit {
   }
 
   private calculateStreakMultiplier(settings: GameSettings, streak: number): number {
-    if (streak <= 1) return settings.streakBaseMultiplier
-    return settings.streakBaseMultiplier + (streak - 1) * settings.streakIncrementPerDay
+    // Multiplier rules:
+    // - First day (streak <= 0) → base multiplier (e.g. 1.0x)
+    // - Second day onward → base + streak * increment (so day 2 already gets a bonus)
+    // - Hard cap at 2.0x to avoid unbounded growth
+    if (streak <= 0) {
+      return settings.streakBaseMultiplier
+    }
+
+    const raw = settings.streakBaseMultiplier + streak * settings.streakIncrementPerDay
+    const capped = Math.min(raw, 2.0)
+    return capped
   }
 
   /**
