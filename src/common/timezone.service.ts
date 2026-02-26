@@ -55,7 +55,7 @@ export class TimezoneService {
     const envTimezone = this.configService.get<string>('WORDPRESS_TIMEZONE')
     if (envTimezone) {
       this.wpTimezone = envTimezone
-      await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600) // Cache for 1 hour
+      await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600 * 1000) // Cache for 1 hour (3600000ms)
       return this.wpTimezone
     }
 
@@ -67,7 +67,7 @@ export class TimezoneService {
         })
         if (response.data && response.data.timezone) {
           this.wpTimezone = response.data.timezone
-          await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600)
+          await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600 * 1000) // 1 hour
           return this.wpTimezone
         }
       } catch (customEndpointError) {
@@ -79,7 +79,7 @@ export class TimezoneService {
     // Note: Set WORDPRESS_TIMEZONE environment variable to match WordPress admin timezone setting
     // (Settings → General → Timezone in WordPress admin)
     this.wpTimezone = 'UTC'
-    await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600)
+    await this.cacheManager.set(this.wpTimezoneCacheKey, this.wpTimezone, 3600 * 1000) // 1 hour
     return this.wpTimezone
   }
 

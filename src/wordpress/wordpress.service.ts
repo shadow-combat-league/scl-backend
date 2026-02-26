@@ -88,7 +88,7 @@ export class WordpressService {
         author: post._embedded?.author?.[0]?.name || '',
       }))
 
-      await this.cacheManager.set(cacheKey, posts, 600) // Cache for 10 minutes
+      await this.cacheManager.set(cacheKey, posts, 600 * 1000) // Cache for 10 minutes (600000ms)
       return posts
     } catch (error) {
       console.error('WordPress API error:', error)
@@ -140,7 +140,7 @@ export class WordpressService {
         author: post._embedded?.author?.[0]?.name || '',
       }
 
-      await this.cacheManager.set(cacheKey, formatted, 600)
+      await this.cacheManager.set(cacheKey, formatted, 600 * 1000) // Cache for 10 minutes (600000ms)
       return formatted
     } catch (error) {
       console.error('WordPress API error:', error)
@@ -206,7 +206,7 @@ export class WordpressService {
         author: post._embedded?.author?.[0]?.name || '',
       }
 
-      await this.cacheManager.set(cacheKey, formatted, 600)
+      await this.cacheManager.set(cacheKey, formatted, 600 * 1000) // Cache for 10 minutes (600000ms)
       return formatted
     } catch (error) {
       console.error('WordPress API error (game_ref_code):', error)
@@ -433,7 +433,7 @@ export class WordpressService {
         kickUsername,
       }
 
-      await this.cacheManager.set(cacheKey, settings, 60) // Cache for 1 minute (settings change frequently)
+      await this.cacheManager.set(cacheKey, settings, 60 * 1000) // Cache for 60 seconds (60000ms)
       return settings
     } catch (error) {
       console.error('WordPress API error (site_settings):', error)

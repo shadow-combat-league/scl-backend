@@ -864,7 +864,7 @@ export class GameService implements OnModuleInit {
     }
 
     const cacheSetStart = Date.now()
-    await this.cacheManager.set(cacheKey, player, 3600) // Cache for 1 hour
+    await this.cacheManager.set(cacheKey, player, 3600 * 1000) // Cache for 1 hour (3600000ms)
     const cacheSetDuration = (Date.now() - cacheSetStart) / 1000
     this.metricsService.cacheOperations.observe(
       { operation: 'set', cache_key_pattern: 'player:*' },
@@ -1043,46 +1043,48 @@ export class GameService implements OnModuleInit {
    */
   async getSettings(): Promise<GameSettings> {
     const cacheKey = 'game:settings'
-    
+    const fallbackKey = 'game:settings:fallback'
+
+    // --- Primary cache (60s TTL) ---
     try {
       const cacheStart = Date.now()
       const cached = await this.cacheManager.get<GameSettings>(cacheKey)
-      const cacheDuration = (Date.now() - cacheStart) / 1000
-      
       this.metricsService.cacheOperations.observe(
         { operation: 'get', cache_key_pattern: 'game:settings' },
-        cacheDuration,
+        (Date.now() - cacheStart) / 1000,
       )
-      
-      console.log(`[Cache] Checking cache for ${cacheKey}:`, cached ? 'HIT' : 'MISS')
-      
+
       if (cached) {
         this.metricsService.cacheHits.inc({ cache_key_pattern: 'game:settings' })
-        console.log(`[Cache] Returning cached settings`)
         return cached
-      } else {
-        this.metricsService.cacheMisses.inc({ cache_key_pattern: 'game:settings' })
       }
+      this.metricsService.cacheMisses.inc({ cache_key_pattern: 'game:settings' })
     } catch (error) {
       console.error(`[Cache] Error accessing cache:`, error)
       this.metricsService.redisErrors.inc({ error_type: 'cache_read_error' })
-      // Continue to load from WordPress if cache fails
     }
 
-    // Fetch from WordPress (single source of truth)
-    console.log('[getSettings] Fetching game settings from WordPress...')
-    const wpSettings = await this.wordpressService.getGameSettings()
-    
+    // --- Fetch from WordPress ---
+    console.log('[getSettings] Cache miss — fetching from WordPress...')
+    let wpSettings = await this.wordpressService.getGameSettings()
+
     if (!wpSettings || !wpSettings.launchDate) {
-      throw new Error('WordPress game settings are required. Please configure game_launch_date in WordPress ACF.')
+      // WordPress unavailable — try stale fallback (24h TTL) before throwing
+      try {
+        const stale = await this.cacheManager.get<GameSettings>(fallbackKey)
+        if (stale) {
+          console.warn('[getSettings] ⚠️ WordPress unavailable — serving stale settings from fallback cache')
+          return stale
+        }
+      } catch (fallbackError) {
+        console.error('[getSettings] Error reading fallback cache:', fallbackError)
+      }
+      throw new Error('WordPress game settings are required and no fallback is available. Please configure game_launch_date in WordPress ACF.')
     }
 
-    // Get DB-only fields (streak multipliers, etc.)
+    // --- Get / initialise DB-only fields ---
     let dbSettings = await this.prisma.gameSettings.findUnique({ where: { id: 1 } })
-    
-    // Create DB row if it doesn't exist (for DB-only fields)
     if (!dbSettings) {
-      // Use create directly since we know it doesn't exist
       dbSettings = await this.prisma.gameSettings.create({
         data: {
           id: 1,
@@ -1093,83 +1095,66 @@ export class GameService implements OnModuleInit {
           referralExtraPlays: 3,
         },
       })
-      console.log(`✅ GameSettings DB row initialized (DB-only fields)`)
+      console.log(`✅ GameSettings DB row initialized`)
     }
 
-    // Merge WordPress (source of truth) + DB-only fields
     const mergedSettings = mergeGameSettings(wpSettings, dbSettings)
-    
+
     console.log(`[getSettings] ✅ Merged settings:`, {
       launchDate: mergedSettings.launchDate?.toISOString(),
       gameState: mergedSettings.gameState,
       weeklyResetEnabled: mergedSettings.weeklyResetEnabled,
-      weeklyResetDay: mergedSettings.weeklyResetDay,
-      weeklyResetHour: mergedSettings.weeklyResetHour,
-      weeklyResetMinute: mergedSettings.weeklyResetMinute,
       streakBaseMultiplier: mergedSettings.streakBaseMultiplier,
       referralExtraPlays: mergedSettings.referralExtraPlays,
     })
 
-    // Cache for 60 seconds (cache-manager expects TTL in milliseconds)
+    // --- Write to primary cache (60s) + fallback cache (24h) ---
     try {
-      const ttlMs = 60 * 1000 // 60 seconds in milliseconds
-      console.log(`[Cache] Attempting to store in cache: ${cacheKey}, TTL: ${ttlMs}ms (60s)`)
-      
-      // Store in cache - cache-manager will pass TTL in milliseconds to the store
+      const ttlMs = 60 * 1000
       const cacheSetStart = Date.now()
       await this.cacheManager.set(cacheKey, mergedSettings, ttlMs)
-      const cacheSetDuration = (Date.now() - cacheSetStart) / 1000
       this.metricsService.cacheOperations.observe(
         { operation: 'set', cache_key_pattern: 'game:settings' },
-        cacheSetDuration,
+        (Date.now() - cacheSetStart) / 1000,
       )
-      console.log(`[Cache] ✅ Stored settings in cache with key: ${cacheKey}`)
-      
-      // Directly check Redis to verify it's actually there
-      try {
-        const store = (this.cacheManager as Cache & { store?: Store }).store
-        if (store && 'get' in store && typeof store.get === 'function') {
-          const directRedisValue = await store.get(cacheKey)
-          if (directRedisValue) {
-            console.log(`[Cache] ✅ Direct Redis check passed - key exists in Redis`)
-          } else {
-            console.error(`[Cache] ❌ Direct Redis check FAILED - key not found in Redis!`)
-          }
-        }
-      } catch (redisCheckError) {
-        console.error(`[Cache] ❌ Error checking Redis directly:`, redisCheckError)
-      }
-      
-      // Verify via cache manager
-      const verifyCache = await this.cacheManager.get<GameSettings>(cacheKey)
-      if (verifyCache && verifyCache.id === mergedSettings.id) {
-        console.log(`[Cache] ✅ Verified cache write via cache manager - key exists`)
-      } else {
-        console.error(`[Cache] ❌ WARNING: Cache write verification failed! This might be using in-memory cache.`)
-      }
-    } catch (error) {
-      console.error(`[Cache] ❌ CRITICAL: Error storing in cache:`, error)
-      console.error(`[Cache] ❌ Error details:`, error)
-      console.error(`[Cache] ❌ This is a critical error - cache must work for Kubernetes multi-pod deployments`)
-      // Don't continue silently - throw error to prevent deployment with broken cache
-      throw new Error(`Cache write failed: ${error.message}. Cannot proceed without Redis cache.`)
+      console.log(`[Cache] ✅ Stored settings (60s TTL)`)
+
+      // Stale fallback: 24 hours — survives WordPress outages / pod restarts
+      await this.cacheManager.set(fallbackKey, mergedSettings, 24 * 60 * 60 * 1000)
+      console.log(`[Cache] ✅ Stored settings fallback (24h TTL)`)
+    } catch (error: unknown) {
+      const err = error as Error
+      console.error(`[Cache] ❌ CRITICAL: Error storing in cache:`, err.message)
+      throw new Error(`Cache write failed: ${err.message}. Cannot proceed without Redis cache.`)
     }
-    
+
     return mergedSettings
   }
 
   /**
-   * Get game state information for frontend
+   * Get game state information for frontend.
+   * Returns a graceful degraded response if WordPress is temporarily unavailable
+   * and the stale fallback cache is also empty.
    */
   async getGameState(): Promise<{ gameState: string; launchDate: string; isLaunched: boolean }> {
-    const settings = await this.getSettings()
-    const now = new Date()
-    const isLaunched = now >= settings.launchDate
-
-    return {
-      gameState: settings.gameState,
-      launchDate: settings.launchDate.toISOString(),
-      isLaunched,
+    try {
+      const settings = await this.getSettings()
+      const now = new Date()
+      return {
+        gameState: settings.gameState,
+        launchDate: settings.launchDate.toISOString(),
+        isLaunched: now >= settings.launchDate,
+      }
+    } catch (error: unknown) {
+      // getSettings() already attempted the 24h stale fallback — if we're here,
+      // both WordPress and the fallback cache are unavailable.
+      // Return a safe degraded response rather than crashing with 500.
+      console.error('[GameService] getGameState failed — returning degraded response:', error)
+      return {
+        gameState: 'ACTIVE',
+        launchDate: new Date(0).toISOString(),
+        isLaunched: true,
+      }
     }
   }
 

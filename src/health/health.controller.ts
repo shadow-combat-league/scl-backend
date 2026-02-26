@@ -10,19 +10,29 @@ export class HealthController {
     private prisma: PrismaService,
   ) {}
 
+  /**
+   * Liveness probe — used by k8s to decide if the container should be restarted.
+   * Must be cheap: no DB, no Redis, no external calls.
+   * Just confirms the Node.js process is alive and the event loop is not stuck.
+   */
   @Get()
+  async liveness() {
+    return { status: 'ok' }
+  }
+
+  /**
+   * Readiness probe — used by k8s to decide if traffic should be routed here.
+   * Checks DB and memory; a failure means "don't send me requests" but does NOT restart the pod.
+   */
+  @Get('ready')
   @HealthCheck()
-  async check() {
+  async readiness() {
     return this.health.check([
       async () => {
-        // Check Prisma database connection
         await this.prisma.$queryRaw`SELECT 1`
         return { database: { status: 'up' } }
       },
-      // Memory checks with more realistic thresholds for production workloads
-      // Heap: 500MB (Node.js apps typically use 200-400MB under normal load)
       () => this.memory.checkHeap('memory_heap', 500 * 1024 * 1024),
-      // RSS: 1GB (total memory including heap, stack, and code)
       () => this.memory.checkRSS('memory_rss', 1024 * 1024 * 1024),
     ])
   }
