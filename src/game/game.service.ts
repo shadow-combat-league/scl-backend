@@ -23,6 +23,13 @@ import { GameSettings, mergeGameSettings } from './types/game-settings.type'
 export class GameService implements OnModuleInit {
   private readonly prisma: PrismaClient
 
+  /**
+   * Thundering herd protection: tracks an in-progress WordPress fetch promise.
+   * When the cache is cold and multiple concurrent requests arrive simultaneously,
+   * only ONE actually calls WordPress — all others await the same promise.
+   */
+  private settingsFetchInProgress: Promise<GameSettings> | null = null
+
   constructor(
     prismaService: PrismaService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
@@ -1064,8 +1071,28 @@ export class GameService implements OnModuleInit {
       this.metricsService.redisErrors.inc({ error_type: 'cache_read_error' })
     }
 
-    // --- Fetch from WordPress ---
+    // --- Thundering herd protection ---
+    // If another request is already fetching from WordPress, piggyback on it
+    // instead of firing another concurrent request. This collapses N simultaneous
+    // cache-miss requests into a single WordPress call.
+    if (this.settingsFetchInProgress) {
+      console.log('[getSettings] In-flight fetch detected — awaiting existing WordPress request')
+      return this.settingsFetchInProgress
+    }
+
     console.log('[getSettings] Cache miss — fetching from WordPress...')
+    this.settingsFetchInProgress = this.fetchAndCacheSettings(cacheKey, fallbackKey).finally(() => {
+      this.settingsFetchInProgress = null
+    })
+
+    return this.settingsFetchInProgress
+  }
+
+  /**
+   * Internal: fetches from WordPress, merges with DB settings, and writes both caches.
+   * Only ever called by one concurrent request at a time (thundering herd protection).
+   */
+  private async fetchAndCacheSettings(cacheKey: string, fallbackKey: string): Promise<GameSettings> {
     let wpSettings = await this.wordpressService.getGameSettings()
 
     if (!wpSettings || !wpSettings.launchDate) {
@@ -1108,16 +1135,16 @@ export class GameService implements OnModuleInit {
       referralExtraPlays: mergedSettings.referralExtraPlays,
     })
 
-    // --- Write to primary cache (60s) + fallback cache (24h) ---
+    // --- Write to primary cache (5min) + fallback cache (24h) ---
     try {
-      const ttlMs = 60 * 1000
+      const ttlMs = 5 * 60 * 1000 // 5 minutes — settings rarely change during operation
       const cacheSetStart = Date.now()
       await this.cacheManager.set(cacheKey, mergedSettings, ttlMs)
       this.metricsService.cacheOperations.observe(
         { operation: 'set', cache_key_pattern: 'game:settings' },
         (Date.now() - cacheSetStart) / 1000,
       )
-      console.log(`[Cache] ✅ Stored settings (60s TTL)`)
+      console.log(`[Cache] ✅ Stored settings (5min TTL)`)
 
       // Stale fallback: 24 hours — survives WordPress outages / pod restarts
       await this.cacheManager.set(fallbackKey, mergedSettings, 24 * 60 * 60 * 1000)

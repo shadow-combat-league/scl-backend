@@ -44,7 +44,7 @@ export class WordpressService {
     const wpUrl = this.configService.get<string>('WORDPRESS_URL', 'http://wordpress:80')
     this.wpClient = axios.create({
       baseURL: wpUrl,
-      timeout: 10000,
+      timeout: 3000, // Fail fast — stale Redis fallback kicks in if WordPress is slow/OOMed
     })
   }
 
