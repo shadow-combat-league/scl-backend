@@ -11,6 +11,7 @@ import { WordpressService } from '../wordpress/wordpress.service'
 import { fromZonedTime, toZonedTime } from 'date-fns-tz'
 import { SubmitScoreDto } from './dto/submit-score.dto'
 import { GetPlayerStatusDto } from './dto/get-player-status.dto'
+import { BonusService } from './bonus.service'
 
 // Define types from Prisma client method return types
 type GameSession = Awaited<ReturnType<PrismaClient['gameSession']['create']>>
@@ -37,6 +38,7 @@ export class GameService implements OnModuleInit {
     private metricsService: MetricsService,
     private timezoneService: TimezoneService,
     private wordpressService: WordpressService,
+    private bonusService: BonusService,
   ) {
     // PrismaService extends PrismaClient, so we can safely assign it
     // This ensures TypeScript recognizes all PrismaClient methods
@@ -181,9 +183,18 @@ export class GameService implements OnModuleInit {
       ? Math.max(0, referral.extraPlaysTotal - referral.extraPlaysUsed)
       : 0
     
-    // Cap referralPlaysUsed at totalPlaysUsed to prevent data inconsistency
+    // Check for bonus extra plays
+    const bonusTotals = await this.bonusService.getBonusTotals(player.walletAddress.toLowerCase())
+    const bonusPlaysUsed = bonusTotals.totalBonusPlaysUsed
+    const bonusPlaysRemaining = bonusTotals.totalBonusPlaysRemaining
+
+    // Total extra plays used = referral + bonus
+    const totalExtraPlaysUsed = referralPlaysUsed + bonusPlaysUsed
+
+    // Cap extra plays used at totalPlaysUsed to prevent data inconsistency
     // This ensures basePlaysUsed is never negative
     const safeReferralPlaysUsed = Math.min(referralPlaysUsed, totalPlaysUsed)
+    const safeTotalExtraPlaysUsed = Math.min(totalExtraPlaysUsed, totalPlaysUsed)
     
     // Log if we had to cap the value (indicates a data inconsistency)
     if (referral && referralPlaysUsed > totalPlaysUsed) {
@@ -197,38 +208,31 @@ export class GameService implements OnModuleInit {
       })
     }
 
-    // Calculate base plays remaining (excluding referral plays)
+    // Calculate base plays remaining (excluding referral and bonus plays)
     // Base plays are 1 per day since launch
-    // Referral plays used should not count against base plays
-    // Example: If totalPlaysUsed = 100 and referralPlaysUsed = 3, then basePlaysUsed = 97
-    // Use safeReferralPlaysUsed to prevent negative basePlaysUsed
-    const basePlaysUsed = Math.max(0, totalPlaysUsed - safeReferralPlaysUsed)
+    // Extra plays used (referral + bonus) should not count against base plays
+    const basePlaysUsed = Math.max(0, totalPlaysUsed - safeTotalExtraPlaysUsed)
     
     // Base plays remaining = base plays allowed minus base plays used
     // This cannot go negative
     const basePlaysRemaining = Math.max(0, basePlaysAllowed - basePlaysUsed)
     
-    // Total plays remaining = base plays remaining + referral plays remaining
-    const playsRemaining = basePlaysRemaining + referralExtraPlaysRemaining
+    // Total plays remaining = base plays remaining + referral plays remaining + bonus plays remaining
+    const playsRemaining = basePlaysRemaining + referralExtraPlaysRemaining + bonusPlaysRemaining
     
-    // Debug logging for referral play calculation
-    console.log('[Referral] getPlayerStatus calculation:', {
+    // Debug logging for extra play calculation
+    console.log('[ExtraPlays] getPlayerStatus calculation:', {
       walletAddress: player.walletAddress,
       totalPlaysUsed,
       referralPlaysUsed,
-      safeReferralPlaysUsed,
+      bonusPlaysUsed,
+      safeTotalExtraPlaysUsed,
       basePlaysUsed,
       basePlaysAllowed,
       basePlaysRemaining,
       referralExtraPlaysRemaining,
+      bonusPlaysRemaining,
       playsRemaining,
-      hasReferral: !!referral,
-      referralData: referral ? {
-        extraPlaysTotal: referral.extraPlaysTotal,
-        extraPlaysUsed: referral.extraPlaysUsed,
-        extraPlaysRemaining: referral.extraPlaysTotal - referral.extraPlaysUsed,
-      } : null,
-      dataInconsistency: referralPlaysUsed > totalPlaysUsed ? 'YES - CAPPED' : 'NO',
     })
 
     // Compute next available play time if user is out of plays
@@ -547,13 +551,11 @@ export class GameService implements OnModuleInit {
       })
       console.log('[Referral] Referral play marked as used successfully')
     } else {
-      console.log('[Referral] This was NOT a referral play:', {
-        walletAddress: player.walletAddress,
-        hasReferral: !!referral,
-        extraPlaysUsed: referral?.extraPlaysUsed,
-        extraPlaysTotal: referral?.extraPlaysTotal,
-        canUseReferral: referral && referral.extraPlaysUsed < referral.extraPlaysTotal,
-      })
+      // No referral play used - check if this was a bonus play
+      const usedBonusPlay = await this.bonusService.markBonusPlayUsed(player.walletAddress.toLowerCase())
+      if (usedBonusPlay) {
+        console.log('[Bonus] Bonus play marked as used for:', player.walletAddress)
+      }
     }
 
     // Update player totals

@@ -202,8 +202,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 6000, // 1000 + 5000
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 1,
         },
       })
@@ -214,8 +212,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 3500, // 500 + 3000
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 1,
         },
       })
@@ -316,8 +312,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 10000,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 1,
         },
       })
@@ -537,8 +531,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 1000,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 1,
         },
       })
@@ -595,8 +587,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 5000,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 1,
         },
       })
@@ -647,7 +637,6 @@ describe('WeeklyResetService', () => {
         ...player,
         lifetimeTotalScore: 3000,
         weeklyScore: 0,
-        weeklyStreak: 0,
         lastResetWeekNumber: 1,
       })
 
@@ -681,8 +670,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 4500,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 2,
         },
       })
@@ -745,8 +732,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 6000,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 3,
         },
       })
@@ -913,8 +898,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 6000,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 1,
         },
       })
@@ -925,8 +908,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 3500,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 1,
         },
       })
@@ -937,8 +918,6 @@ describe('WeeklyResetService', () => {
         data: {
           lifetimeTotalScore: 12000,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
           lastResetWeekNumber: 1,
         },
       })

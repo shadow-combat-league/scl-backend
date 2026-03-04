@@ -116,3 +116,16 @@ model ReferralCode {
   @@index([walletAddress])
   @@index([code])
 }
+
+model BonusPlay {
+  id              Int      @id @default(autoincrement())
+  walletAddress   String   @db.VarChar(42)
+  bonusType       String   @db.VarChar(50) // 'telegram' | 'base_farcaster'
+  extraPlaysTotal Int // Extra plays granted for this bonus
+  extraPlaysUsed  Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([walletAddress, bonusType])
+  @@index([walletAddress])
+}

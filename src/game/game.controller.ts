@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common'
 import { GameService } from './game.service'
 import { ReferralService } from './referral.service'
+import { BonusService, BonusType } from './bonus.service'
 import { SubmitScoreDto } from './dto/submit-score.dto'
 import { GameStateGuard } from './guards/game-state.guard'
 
@@ -9,6 +10,7 @@ export class GameController {
   constructor(
     private readonly gameService: GameService,
     private readonly referralService: ReferralService,
+    private readonly bonusService: BonusService,
   ) {}
 
   @Get('state')
@@ -67,6 +69,18 @@ export class GameController {
   @Get('referral/:walletAddress')
   async getReferralInfo(@Param('walletAddress') walletAddress: string) {
     return this.referralService.getReferralInfo(walletAddress)
+  }
+
+  @Post('bonus/claim')
+  async claimBonus(
+    @Body() body: { walletAddress: string; bonusType: BonusType },
+  ) {
+    return this.bonusService.claimBonus(body.walletAddress, body.bonusType)
+  }
+
+  @Get('bonus/:walletAddress')
+  async getBonusStatus(@Param('walletAddress') walletAddress: string) {
+    return this.bonusService.getBonusStatus(walletAddress)
   }
 
   @Get('debug/:walletAddress')

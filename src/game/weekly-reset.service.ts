@@ -221,8 +221,9 @@ export class WeeklyResetService implements OnModuleInit {
         data: {
           lifetimeTotalScore,
           weeklyScore: 0,
-          weeklyStreak: 0,
-          weeklyLongestStreak: 0,
+          // weeklyStreak and weeklyLongestStreak are intentionally NOT reset —
+          // streaks are continuous day-based counters that carry over across weeks.
+          // Only the score resets for weekly leaderboard competition.
           lastResetWeekNumber: currentWeekNumber,
         },
       })
