@@ -23,8 +23,9 @@ model Player {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  sessions GameSession[]
-  streaks  PlayerStreak[]
+  sessions          GameSession[]
+  streaks           PlayerStreak[]
+  blockchainCheckIns BlockchainCheckIn[]
 }
 
 model GameSession {
@@ -128,4 +129,22 @@ model BonusPlay {
 
   @@unique([walletAddress, bonusType])
   @@index([walletAddress])
+}
+
+/// Tracks on-chain DailyCheckIn events that have been processed by the
+/// blockchain monitor. Used for idempotency — ensures each tx is only
+/// ever credited once, even if the service restarts and re-scans old blocks.
+model BlockchainCheckIn {
+  id            Int      @id @default(autoincrement())
+  txHash        String   @unique @db.VarChar(66) // 0x + 64 hex chars
+  walletAddress String   @db.VarChar(42)
+  blockNumber   Int
+  pointsAwarded Int
+  playerId      Int
+  processedAt   DateTime @default(now())
+
+  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@index([walletAddress])
+  @@index([blockNumber])
 }
