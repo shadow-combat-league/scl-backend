@@ -67,28 +67,24 @@ export class WeeklyResetService implements OnModuleInit {
       const daysSinceLaunch = Math.floor((nowMs - launchMs) / dayMs)
       return Math.floor(daysSinceLaunch / 7)
     } else {
-      // Production mode: Use real calendar weeks with timezone
+      // Production mode: Use real calendar weeks in WordPress timezone (GMT+8 / Asia/Singapore).
+      // "Now" must be interpreted in WP timezone so we get the correct calendar day and time
+      // (e.g. Friday 02:00 SG, not start-of-day which would wrongly be "before reset").
       const wpTimezone = await this.timezoneService.getWordPressTimezone()
       const resetDay = settings.weeklyResetDay ?? 0
       const resetHour = settings.weeklyResetHour ?? 1
       const resetMinute = settings.weeklyResetMinute ?? 0
       
-      // Get start of day in WordPress timezone for both dates
+      // Launch: start of day in WordPress timezone
       const launchDateTz = await this.timezoneService.getStartOfDayInTimezone(settings.launchDate)
       if (!launchDateTz) {
         throw new Error('Failed to parse launch date')
       }
-      
-      const nowTz = await this.timezoneService.getStartOfDayInTimezone(now)
-      if (!nowTz) {
-        throw new Error('Failed to parse current date')
-      }
-      
-      // Convert to zoned time to get day of week in WordPress timezone
       const launchZoned = toZonedTime(launchDateTz, wpTimezone)
-      const nowZoned = toZonedTime(nowTz, wpTimezone)
-      
       const launchDay = launchZoned.getDay()
+      
+      // Now: use actual instant in WordPress timezone so day + time are correct (e.g. Friday 02:00)
+      const nowZoned = toZonedTime(now, wpTimezone)
       const currentDay = nowZoned.getDay()
       const currentHour = nowZoned.getHours()
       const currentMinute = nowZoned.getMinutes()
