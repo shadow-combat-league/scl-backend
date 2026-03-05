@@ -194,7 +194,12 @@ export class WeeklyResetService implements OnModuleInit {
       })
     }
 
-    // Invalidate leaderboard cache (we'll rely on TTL expiration)
+    // Invalidate player caches so the next score submission loads fresh DB data (weeklyScore = 0).
+    // Without this, findOrCreatePlayer would return cached player with old weeklyScore and we would
+    // add the new round score on top of it (e.g. 211 + roundScore).
+    await this.gameService.invalidateAllPlayerCaches()
+
+    // Leaderboard cache: we rely on TTL expiration (or could add explicit invalidation here if needed).
     this.logger.log(`Weekly reset completed for ${players.length} players. Week ${currentWeekNumber} started.`)
   }
 

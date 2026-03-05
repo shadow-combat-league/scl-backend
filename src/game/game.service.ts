@@ -884,6 +884,27 @@ export class GameService implements OnModuleInit {
     return player
   }
 
+  /**
+   * Invalidate all player:* cache entries. Must be called after weekly reset so that
+   * the next findOrCreatePlayer loads fresh DB data (e.g. weeklyScore = 0) instead of
+   * stale cached values that would cause submitted scores to be added on top of old totals.
+   */
+  async invalidateAllPlayerCaches(): Promise<void> {
+    try {
+      const store = (this.cacheManager as Cache & { store?: Store & { keys?: (pattern: string) => Promise<string[]>; mdel?: (...keys: string[]) => Promise<void> } }).store
+      if (store && 'keys' in store && 'mdel' in store && typeof store.keys === 'function' && typeof store.mdel === 'function') {
+        const playerKeys = await store.keys('player:*')
+        if (playerKeys && playerKeys.length > 0) {
+          await store.mdel(...playerKeys)
+          console.log(`[Cache] Invalidated ${playerKeys.length} player cache keys after weekly reset`)
+        }
+      }
+    } catch (err) {
+      console.error('[Cache] Error invalidating player caches after weekly reset:', err)
+      // Non-fatal; next read will miss cache and hit DB
+    }
+  }
+
   private calculateStreakMultiplier(settings: GameSettings, streak: number, isForScoreSubmission = false): number {
     // Multiplier rules:
     // During score submission: streak represents "day you're on"
