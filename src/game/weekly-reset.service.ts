@@ -151,42 +151,11 @@ export class WeeklyResetService implements OnModuleInit {
       data: { currentWeekNumber },
     })
 
-    // Get all players that need a reset
-    // IMPORTANT: Only reset players who haven't been reset for THIS specific week
-    // If week number jumped (e.g., 0 -> 37512), only reset players who were reset
-    // in the storedWeekNumber or earlier, not players already reset in intermediate weeks
-    let players: Awaited<ReturnType<typeof this.prisma.player.findMany>>
-    
-    if (storedWeekNumber !== null && currentWeekNumber > storedWeekNumber + 1) {
-      // Week number jumped - only reset players who were reset in storedWeekNumber or earlier
-      // This prevents double-resetting players who were already reset in intermediate weeks
-      this.logger.warn(
-        `Week number jumped from ${storedWeekNumber} to ${currentWeekNumber}. ` +
-        `Only resetting players who were reset in week ${storedWeekNumber} or earlier.`
-      )
-      
-      players = await this.prisma.player.findMany({
-        where: {
-          OR: [
-            { lastResetWeekNumber: null },
-            { lastResetWeekNumber: { lte: storedWeekNumber } },
-          ],
-        },
-      })
-    } else {
-      // Normal case: week number increased by 1, reset all players who haven't been reset yet
-      players = await this.prisma.player.findMany({
-        where: {
-          OR: [
-            { lastResetWeekNumber: null },
-            { lastResetWeekNumber: { lt: currentWeekNumber } },
-          ],
-        },
-      })
-    }
+    // Every new week = clean slate. Reset ALL players so everyone starts the week at 0.
+    const players = await this.prisma.player.findMany()
 
     if (players.length === 0) {
-      this.logger.debug('No players need weekly reset.')
+      this.logger.debug('No players to reset.')
       return
     }
 
