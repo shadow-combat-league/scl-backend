@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { createPublicClient, http, parseAbiItem, type Log } from 'viem'
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import { createPublicClient, http, parseAbiItem } from 'viem'
 import { base, baseSepolia } from 'viem/chains'
 import { PrismaService } from '../prisma/prisma.service'
 
@@ -18,13 +19,17 @@ const CHECKIN_POINTS = 100
 // ~1 day on Base (~43,200 blocks at 2s/block).
 const CATCHUP_BLOCKS = 43_200n
 
+// Max block range per getLogs call — Base RPC (and Anvil fork) caps at 10,000.
+const MAX_BLOCK_RANGE = 9_999n
+
 // Polling interval in milliseconds.
 const POLL_INTERVAL_MS = 15_000
 
 @Injectable()
 export class BlockchainService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BlockchainService.name)
-  private client: ReturnType<typeof createPublicClient>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private client: any
   private contractAddress: `0x${string}`
   private pollTimer: NodeJS.Timeout | null = null
   private lastProcessedBlock: bigint | null = null
@@ -91,18 +96,33 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
 
       if (fromBlock > latestBlock) return // Nothing new
 
-      const logs = await this.client.getLogs({
-        address: this.contractAddress,
-        event: DAILY_CHECKIN_EVENT,
-        fromBlock,
-        toBlock: latestBlock,
-      })
+      // Chunk into MAX_BLOCK_RANGE windows to respect RPC limits (Base caps at 10,000).
+      let chunkFrom = fromBlock
+      let totalFound = 0
 
-      if (logs.length > 0) {
-        this.logger.log(`Found ${logs.length} DailyCheckIn event(s) in blocks ${fromBlock}–${latestBlock}`)
-        for (const log of logs) {
-          await this.handleCheckInEvent(log)
+      while (chunkFrom <= latestBlock) {
+        const chunkTo = chunkFrom + MAX_BLOCK_RANGE > latestBlock ? latestBlock : chunkFrom + MAX_BLOCK_RANGE
+
+        const logs = await this.client.getLogs({
+          address: this.contractAddress,
+          event: DAILY_CHECKIN_EVENT,
+          fromBlock: chunkFrom,
+          toBlock: chunkTo,
+        })
+
+        if (logs.length > 0) {
+          totalFound += logs.length
+          this.logger.log(`Found ${logs.length} DailyCheckIn event(s) in blocks ${chunkFrom}–${chunkTo}`)
+          for (const log of logs) {
+            await this.handleCheckInEvent(log)
+          }
         }
+
+        chunkFrom = chunkTo + 1n
+      }
+
+      if (totalFound === 0 && fromBlock < latestBlock) {
+        // silent — normal during polling
       }
 
       this.lastProcessedBlock = latestBlock
@@ -117,9 +137,10 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
   // Event handler
   // ─────────────────────────────────────────────────────────────────────────
 
-  private async handleCheckInEvent(log: Log) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async handleCheckInEvent(log: any) {
     const txHash = log.transactionHash
-    const userAddress = (log.args as { user: string }).user?.toLowerCase()
+    const userAddress = (log.args as { user: string })?.user?.toLowerCase()
 
     if (!txHash || !userAddress) {
       this.logger.warn('Received malformed DailyCheckIn log, skipping', log)

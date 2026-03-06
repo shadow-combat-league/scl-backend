@@ -1110,7 +1110,25 @@ export class GameService implements OnModuleInit {
       } catch (fallbackError) {
         console.error('[getSettings] Error reading fallback cache:', fallbackError)
       }
-      throw new Error('WordPress game settings are required and no fallback is available. Please configure game_launch_date in WordPress ACF.')
+
+      // LOCAL DEV MODE: if GAME_LAUNCH_DATE env var is set and WordPress is offline,
+      // synthesise minimal settings so the app can start without WordPress.
+      // NEVER rely on this in production — WordPress is the authoritative source.
+      const localLaunchDate = this.configService.get<string>('GAME_LAUNCH_DATE')
+      const localDevMode = this.configService.get<string>('LOCAL_DEV_MODE') === 'true'
+      if (localDevMode && localLaunchDate) {
+        console.warn('[getSettings] ⚠️ LOCAL_DEV_MODE=true — using GAME_LAUNCH_DATE env fallback (WordPress offline)')
+        wpSettings = {
+          launchDate: new Date(localLaunchDate),
+          gameState: 'ACTIVE',
+          weeklyResetEnabled: false,
+          weeklyResetDay: null,
+          weeklyResetHour: null,
+          weeklyResetMinute: null,
+        }
+      } else {
+        throw new Error('WordPress game settings are required and no fallback is available. Please configure game_launch_date in WordPress ACF.')
+      }
     }
 
     // --- Get / initialise DB-only fields ---
