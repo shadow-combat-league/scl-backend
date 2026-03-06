@@ -14,7 +14,44 @@ export class RedisConfig implements CacheOptionsFactory, OnModuleInit, OnModuleD
     const redisHost = this.configService.get<string>('REDIS_HOST', 'localhost')
     const redisPort = this.configService.get<number>('REDIS_PORT', 6999)
     const redisPassword = this.configService.get<string>('REDIS_PASSWORD')
-    
+    const redisDisabled = this.configService.get<string>('REDIS_DISABLED') === 'true'
+
+    // LOCAL DEV ONLY: If REDIS_DISABLED=true, use in-memory cache (single-process only)
+    // NEVER set this in production / Kubernetes — Redis is required for multi-pod cache coherence
+    if (redisDisabled) {
+      console.log('[Redis] ⚠️  REDIS_DISABLED=true — using in-memory cache (local dev only)')
+      const memStore = new Map<string, { value: unknown; expiresAt: number | null }>()
+      const inMemoryStore: Store = {
+        get: async <T>(key: string) => {
+          const entry = memStore.get(key)
+          if (!entry) return undefined
+          if (entry.expiresAt && Date.now() > entry.expiresAt) { memStore.delete(key); return undefined }
+          return entry.value as T
+        },
+        set: async <T>(key: string, value: T, ttl?: number) => {
+          memStore.set(key, { value, expiresAt: ttl ? Date.now() + ttl : null })
+        },
+        del: async (key: string) => { memStore.delete(key) },
+        reset: async () => { memStore.clear() },
+        keys: async (pattern = '*') => {
+          if (pattern === '*') return [...memStore.keys()]
+          const re = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$')
+          return [...memStore.keys()].filter(k => re.test(k))
+        },
+        ttl: async (key: string) => {
+          const entry = memStore.get(key)
+          if (!entry || !entry.expiresAt) return -1
+          return Math.max(0, Math.ceil((entry.expiresAt - Date.now()) / 1000))
+        },
+        mset: async (args: Array<[string, unknown]>, ttl?: number) => {
+          for (const [k, v] of args) memStore.set(k, { value: v, expiresAt: ttl ? Date.now() + ttl : null })
+        },
+        mget: async (...keys: string[]) => keys.map(k => memStore.get(k)?.value),
+        mdel: async (...keys: string[]) => { for (const k of keys) memStore.delete(k) },
+      }
+      return { store: inMemoryStore, ttl: 3600 }
+    }
+
     // CRITICAL: Always use Redis - NO fallback to in-memory cache
     // This is required for Kubernetes multi-pod deployments
     // Using official 'redis' package directly with cache-manager
