@@ -1529,7 +1529,6 @@ export class GameService implements OnModuleInit {
 
     this.metricsService.cacheMisses.inc({ cache_key_pattern: "checkin:status:*" });
 
-    const settings = await this.getSettings();
     const wpTimezone = await this.timezoneService.getWordPressTimezone();
 
     // Format today in project timezone (e.g. "2026-03-06")
@@ -1537,15 +1536,9 @@ export class GameService implements OnModuleInit {
       new Date(),
     );
 
-    // Build query lower bound from dailyCheckInLaunchDate (if set)
-    const since = settings.dailyCheckInLaunchDate ?? new Date(0);
-
     const records: { checkInAt: Date }[] =
       await this.prisma.blockchainCheckIn.findMany({
-        where: {
-          walletAddress,
-          checkInAt: { gte: since },
-        },
+        where: { walletAddress },
         orderBy: { checkInAt: "desc" },
         select: { checkInAt: true },
       });
