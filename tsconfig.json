@@ -18,8 +18,10 @@
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "ox": ["node_modules/ox/_types/index.d.ts"],
+      "ox/*": ["node_modules/ox/_types/*.d.ts"]
     }
   },
-  "exclude": ["**/*.spec.ts", "**/*.test.ts"]
+  "exclude": ["node_modules", "**/*.spec.ts", "**/*.test.ts"]
 }

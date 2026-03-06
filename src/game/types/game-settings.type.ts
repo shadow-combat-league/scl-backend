@@ -41,6 +41,8 @@ export function mergeGameSettings(
   const weeklyResetDay = wpSettings.weeklyResetDay ?? 0
   const weeklyResetHour = wpSettings.weeklyResetHour ?? 1
   const weeklyResetMinute = wpSettings.weeklyResetMinute ?? 0
+  const dailyCheckInEnabled = wpSettings.dailyCheckInEnabled ?? false
+  const dailyCheckInLaunchDate = wpSettings.dailyCheckInLaunchDate ?? null
 
   if (!dbSettings) {
     // Return WordPress settings with DB defaults
@@ -51,6 +53,8 @@ export function mergeGameSettings(
       weeklyResetDay,
       weeklyResetHour,
       weeklyResetMinute,
+      dailyCheckInEnabled,
+      dailyCheckInLaunchDate,
       id: 1,
       streakBaseMultiplier: 1.0,
       streakIncrementPerDay: 0.1,
@@ -70,6 +74,8 @@ export function mergeGameSettings(
     weeklyResetDay,
     weeklyResetHour,
     weeklyResetMinute,
+    dailyCheckInEnabled,
+    dailyCheckInLaunchDate,
     id: dbSettings.id,
     streakBaseMultiplier: dbSettings.streakBaseMultiplier,
     streakIncrementPerDay: dbSettings.streakIncrementPerDay,
@@ -94,6 +100,8 @@ export function createTestGameSettings(overrides?: Partial<GameSettings>): GameS
     weeklyResetDay: 0,
     weeklyResetHour: 1,
     weeklyResetMinute: 0,
+    dailyCheckInEnabled: false,
+    dailyCheckInLaunchDate: null,
     id: 1,
     streakBaseMultiplier: 1.0,
     streakIncrementPerDay: 0.1,

@@ -83,6 +83,11 @@ export class GameController {
     return this.bonusService.getBonusStatus(walletAddress)
   }
 
+  @Get('checkin/status/:walletAddress')
+  async getCheckInStatus(@Param('walletAddress') walletAddress: string) {
+    return this.gameService.getCheckInStatus(walletAddress)
+  }
+
   @Get('debug/:walletAddress')
   async getDebugInfo(@Param('walletAddress') walletAddress: string) {
     const status = await this.gameService.getPlayerStatus(walletAddress)

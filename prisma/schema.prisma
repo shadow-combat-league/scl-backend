@@ -129,3 +129,15 @@ model BonusPlay {
   @@unique([walletAddress, bonusType])
   @@index([walletAddress])
 }
+
+model BlockchainCheckIn {
+  id            Int      @id @default(autoincrement())
+  txHash        String   @unique @db.VarChar(66) // idempotency key — one credit per tx
+  walletAddress String   @db.VarChar(42)
+  blockNumber   BigInt
+  checkInAt     DateTime // block.timestamp of the DailyCheckIn event (UTC)
+  processedAt   DateTime @default(now())
+
+  @@index([walletAddress])
+  @@index([checkInAt])
+}

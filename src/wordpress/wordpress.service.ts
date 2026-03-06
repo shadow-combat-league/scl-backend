@@ -30,6 +30,8 @@ export interface GameSettingsFromWordPress {
   weeklyResetDay: number | null // 0-6
   weeklyResetHour: number | null // 0-23
   weeklyResetMinute: number | null // 0-59
+  dailyCheckInEnabled: boolean | null
+  dailyCheckInLaunchDate: Date | null
 }
 
 @Injectable()
@@ -481,6 +483,8 @@ export class WordpressService {
           weekly_reset_day?: number | string
           weekly_reset_hour?: number | string
           weekly_reset_minute?: number | string
+          daily_check_in_enabled?: boolean | string | number
+          daily_check_in_launch_date?: string
         }
         meta?: {
           game_launch_date?: string[]
@@ -489,6 +493,8 @@ export class WordpressService {
           weekly_reset_day?: string[]
           weekly_reset_hour?: string[]
           weekly_reset_minute?: string[]
+          daily_check_in_enabled?: string[]
+          daily_check_in_launch_date?: string[]
         }
       }
 
@@ -502,6 +508,8 @@ export class WordpressService {
         weeklyResetDay: null,
         weeklyResetHour: null,
         weeklyResetMinute: null,
+        dailyCheckInEnabled: null,
+        dailyCheckInLaunchDate: null,
       }
 
       if (settingsPost.acf) {
@@ -563,6 +571,18 @@ export class WordpressService {
             gameSettings.weeklyResetMinute = minute
           }
         }
+
+        // Parse daily check-in enabled
+        if (settingsPost.acf.daily_check_in_enabled !== undefined && settingsPost.acf.daily_check_in_enabled !== null) {
+          const value = settingsPost.acf.daily_check_in_enabled
+          gameSettings.dailyCheckInEnabled = value === true || value === '1' || value === 1 || value === 'true'
+        }
+
+        // Parse daily check-in launch date
+        if (settingsPost.acf.daily_check_in_launch_date) {
+          gameSettings.dailyCheckInLaunchDate = await this.parseACFDateTime(settingsPost.acf.daily_check_in_launch_date)
+          console.log(`[getGameSettings] Parsed daily_check_in_launch_date: ${settingsPost.acf.daily_check_in_launch_date} → ${gameSettings.dailyCheckInLaunchDate?.toISOString()}`)
+        }
       } else if (settingsPost.meta) {
         console.log(`[getGameSettings] Using meta fields`)
         
@@ -596,6 +616,13 @@ export class WordpressService {
           if (!isNaN(minute) && minute >= 0 && minute <= 59) {
             gameSettings.weeklyResetMinute = minute
           }
+        }
+        if (settingsPost.meta.daily_check_in_enabled?.[0]) {
+          const value = settingsPost.meta.daily_check_in_enabled[0]
+          gameSettings.dailyCheckInEnabled = value === '1' || value === 'true'
+        }
+        if (settingsPost.meta.daily_check_in_launch_date?.[0]) {
+          gameSettings.dailyCheckInLaunchDate = await this.parseACFDateTime(settingsPost.meta.daily_check_in_launch_date[0])
         }
       }
 
@@ -646,6 +673,13 @@ export class WordpressService {
                 gameSettings.weeklyResetMinute = minute
               }
             }
+            if (acfResponse.data.acf.daily_check_in_enabled !== undefined) {
+              const value = acfResponse.data.acf.daily_check_in_enabled
+              gameSettings.dailyCheckInEnabled = value === true || value === '1' || value === 1 || value === 'true'
+            }
+            if (acfResponse.data.acf.daily_check_in_launch_date) {
+              gameSettings.dailyCheckInLaunchDate = await this.parseACFDateTime(acfResponse.data.acf.daily_check_in_launch_date)
+            }
           }
         } catch (acfError) {
           console.warn('[getGameSettings] ACF REST API not available:', acfError)
@@ -659,6 +693,8 @@ export class WordpressService {
         weeklyResetDay: gameSettings.weeklyResetDay,
         weeklyResetHour: gameSettings.weeklyResetHour,
         weeklyResetMinute: gameSettings.weeklyResetMinute,
+        dailyCheckInEnabled: gameSettings.dailyCheckInEnabled,
+        dailyCheckInLaunchDate: gameSettings.dailyCheckInLaunchDate?.toISOString(),
       })
 
       // Cache for 60 seconds (same as game settings cache)

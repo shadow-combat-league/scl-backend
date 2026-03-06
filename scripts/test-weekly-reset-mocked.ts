@@ -93,6 +93,8 @@ async function main() {
     // Return mocked data directly, bypassing cache and WordPress API
     return {
       launchDate: mockLaunchDate,
+      dailyCheckInEnabled: false,
+      dailyCheckInLaunchDate: null,
       gameState: 'ACTIVE' as const,
       weeklyResetEnabled: true,
       weeklyResetDay: 0, // Sunday

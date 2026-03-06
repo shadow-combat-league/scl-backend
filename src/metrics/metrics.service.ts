@@ -30,6 +30,10 @@ export class MetricsService implements OnModuleInit {
   public readonly redisOperations: Histogram<string>
   public readonly redisErrors: Counter<string>
 
+  // Check-In Metrics
+  public readonly checkInStatusRequests: Counter<string>
+  public readonly blockchainCheckInProcessed: Counter<string>
+
   // Livestream / Kick Metrics
   public readonly kickChatConnections: Gauge<string>
   public readonly kickChatMessagesTotal: Counter<string>
@@ -156,6 +160,20 @@ export class MetricsService implements OnModuleInit {
       name: 'redis_errors_total',
       help: 'Total number of Redis errors',
       labelNames: ['error_type'],
+      registers: [this.register],
+    })
+
+    // Check-In Metrics
+    this.checkInStatusRequests = new Counter({
+      name: 'checkin_status_requests_total',
+      help: 'Total number of daily check-in status requests',
+      labelNames: ['checked_in_today'],
+      registers: [this.register],
+    })
+
+    this.blockchainCheckInProcessed = new Counter({
+      name: 'blockchain_checkin_processed_total',
+      help: 'Total number of on-chain DailyCheckIn events successfully credited',
       registers: [this.register],
     })
 

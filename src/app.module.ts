@@ -6,6 +6,7 @@ import { TerminusModule } from '@nestjs/terminus'
 import { EventEmitterModule } from '@nestjs/event-emitter'
 import { APP_INTERCEPTOR } from '@nestjs/core'
 import { GameModule } from './game/game.module'
+import { BlockchainModule } from './blockchain/blockchain.module'
 import { WordpressModule } from './wordpress/wordpress.module'
 import { HealthModule } from './health/health.module'
 import { MetricsModule } from './metrics/metrics.module'
@@ -29,6 +30,7 @@ import { RedisConfig } from './config/redis.config'
     EventEmitterModule.forRoot(),
     MetricsModule,
     GameModule,
+    BlockchainModule,
     WordpressModule,
     HealthModule,
     KickChatModule,
