@@ -1531,11 +1531,6 @@ export class GameService implements OnModuleInit {
 
     const wpTimezone = await this.timezoneService.getWordPressTimezone();
 
-    // Format today in project timezone (e.g. "2026-03-06")
-    const todayStr = await this.timezoneService.formatDateInTimezone(
-      new Date(),
-    );
-
     const records: { checkInAt: Date }[] =
       await this.prisma.blockchainCheckIn.findMany({
         where: { walletAddress },
@@ -1543,42 +1538,47 @@ export class GameService implements OnModuleInit {
         select: { checkInAt: true },
       });
 
-    // Convert each checkInAt (UTC) to a project-timezone date string, deduplicate
+    // Calendar display dates use the project timezone (SGT) for user-friendly display
     const dateStrings: string[] = records.map((r) =>
       formatInTimeZone(r.checkInAt, wpTimezone, "yyyy-MM-dd"),
     );
     const checkInDates: string[] = [...new Set(dateStrings)];
 
-    const checkedInToday = checkInDates.includes(todayStr);
+    // checkedInToday uses UTC to match the contract's day boundary (resets at UTC midnight)
+    const todayUTCStr = formatInTimeZone(new Date(), "UTC", "yyyy-MM-dd");
+    const checkInDatesUTC = records.map((r) =>
+      formatInTimeZone(r.checkInAt, "UTC", "yyyy-MM-dd"),
+    );
+    const checkedInToday = checkInDatesUTC.includes(todayUTCStr);
 
     // Next UTC midnight (contract reset boundary)
     const nowMs = Date.now();
     const nextResetMs = (Math.floor(nowMs / 86_400_000) + 1) * 86_400_000;
     const nextResetTime = new Date(nextResetMs).toISOString();
 
-    // Calculate current streak (consecutive days ending at most recent check-in)
-    const checkInDateSet = new Set(checkInDates);
+    // Streak uses UTC dates to match contract day boundaries
+    const checkInDateSetUTC = new Set(checkInDatesUTC);
     const countStreakEndingAt = (dateStr: string): number => {
       let count = 0;
       let d = new Date(dateStr + "T12:00:00Z"); // noon UTC avoids DST edge-cases
       while (true) {
-        const ds = formatInTimeZone(d, wpTimezone, "yyyy-MM-dd");
-        if (!checkInDateSet.has(ds)) break;
+        const ds = formatInTimeZone(d, "UTC", "yyyy-MM-dd");
+        if (!checkInDateSetUTC.has(ds)) break;
         count++;
         d = new Date(d.getTime() - 86_400_000);
       }
       return count;
     };
 
-    const yesterdayStr = formatInTimeZone(
+    const yesterdayUTCStr = formatInTimeZone(
       new Date(nowMs - 86_400_000),
-      wpTimezone,
+      "UTC",
       "yyyy-MM-dd",
     );
     // streak = consecutive days ending today (if checked in today) or ending yesterday
     const streak = checkedInToday
-      ? countStreakEndingAt(todayStr)
-      : countStreakEndingAt(yesterdayStr);
+      ? countStreakEndingAt(todayUTCStr)
+      : countStreakEndingAt(yesterdayUTCStr);
 
     // nextCheckInScore: score the player will earn on their next check-in
     // streak is the current active streak; the next check-in continues it (streak+1 for the formula)
