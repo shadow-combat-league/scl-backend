@@ -1490,8 +1490,9 @@ export class GameService implements OnModuleInit {
 
   /**
    * Returns a player's on-chain daily check-in history from the BlockchainCheckIn table.
-   * "Today" and calendar dates are expressed in the project timezone (GMT+8).
-   * The minimum date is the daily_check_in_launch_date from WordPress settings.
+   * Rest of the game uses GMT+8 (WordPress timezone); UTC is used ONLY for this blockchain
+   * check-in feature because the contract's day boundary is midnight UTC (block.timestamp / 1 days).
+   * Calendar and "next reset" follow the contract (midnight UTC = 8AM GMT+8).
    */
   async getCheckInStatus(walletAddress: string): Promise<{
     checkedInToday: boolean;
@@ -1529,8 +1530,6 @@ export class GameService implements OnModuleInit {
 
     this.metricsService.cacheMisses.inc({ cache_key_pattern: "checkin:status:*" });
 
-    const wpTimezone = await this.timezoneService.getWordPressTimezone();
-
     const records: { checkInAt: Date }[] =
       await this.prisma.blockchainCheckIn.findMany({
         where: { walletAddress },
@@ -1538,9 +1537,9 @@ export class GameService implements OnModuleInit {
         select: { checkInAt: true },
       });
 
-    // Calendar display dates use the project timezone (SGT) for user-friendly display
+    // Calendar dates in UTC so the frontend aligns with the contract (one tick per contract-day)
     const dateStrings: string[] = records.map((r) =>
-      formatInTimeZone(r.checkInAt, wpTimezone, "yyyy-MM-dd"),
+      formatInTimeZone(r.checkInAt, "UTC", "yyyy-MM-dd"),
     );
     const checkInDates: string[] = [...new Set(dateStrings)];
 
