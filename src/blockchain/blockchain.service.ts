@@ -59,7 +59,8 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log(`Blockchain monitoring enabled on ${network} — contract: ${this.contractAddress}`)
 
-    await this.startMonitoring(this.viemClient)
+    // Run catch-up in background so the app can listen and pass readiness without waiting for RPC
+    void this.startMonitoring(this.viemClient)
   }
 
   onModuleDestroy(): void {

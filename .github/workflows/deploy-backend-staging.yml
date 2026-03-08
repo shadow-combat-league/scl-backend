@@ -93,8 +93,22 @@ jobs:
             -n ${{ env.NAMESPACE }} || \
           echo "Deployment not found. Please ensure infrastructure repo has deployed the base deployment first."
           
-          # Wait for rollout
-          kubectl rollout status deployment/scl-backend -n ${{ env.NAMESPACE }} --timeout=5m || true
+          # Wait for rollout (fails job if deployment exceeds progress deadline)
+          kubectl rollout status deployment/scl-backend -n ${{ env.NAMESPACE }} --timeout=12m
+
+      - name: Dump backend pod state on failure
+        if: failure()
+        run: |
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=scl-backend -o wide
+          kubectl describe deployment scl-backend -n ${{ env.NAMESPACE }} | tail -80
+          POD=$(kubectl get pods -n ${{ env.NAMESPACE }} -l app=scl-backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) && \
+            if [ -n "$POD" ]; then
+              echo "--- Backend pod logs (main container) ---"
+              kubectl logs "$POD" -n ${{ env.NAMESPACE }} -c backend --tail=100 2>/dev/null || true
+              echo "--- Init container logs (prisma-migrate) ---"
+              kubectl logs "$POD" -n ${{ env.NAMESPACE }} -c prisma-migrate --tail=50 2>/dev/null || true
+            fi
+          kubectl get events -n ${{ env.NAMESPACE }} --sort-by='.lastTimestamp' | tail -30
 
       - name: Verify deployment
         run: |
