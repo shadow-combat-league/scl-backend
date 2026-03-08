@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { MetricsService } from '../metrics/metrics.service'
 import { CACHE_MANAGER } from '@nestjs/cache-manager'
 import type { Cache, Store } from 'cache-manager'
+import { withRpcRetry } from './rpc-retry'
 
 const DAILY_CHECKIN_EVENT_ABI = parseAbiItem('event DailyCheckIn(address indexed user, uint256 timestamp)')
 
@@ -68,12 +69,22 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private rpcRetryOptions(): { onRetry: (attempt: number, err: unknown, delayMs: number) => void } {
+    return {
+      onRetry: (attempt, err, delayMs) =>
+        this.logger.warn(
+          `RPC rate limited or unavailable, retry ${attempt} in ${Math.round(delayMs)}ms`,
+          err instanceof Error ? err.message : err,
+        ),
+    }
+  }
+
   private async startMonitoring(
     client: PublicClient,
   ): Promise<void> {
     // Catch-up: scan ~1 day of missed blocks on startup in 9,999-block chunks
     try {
-      const latestBlock = await client.getBlockNumber()
+      const latestBlock = await withRpcRetry(() => client.getBlockNumber(), this.rpcRetryOptions())
       const scanFrom = latestBlock > CATCHUP_BLOCKS ? latestBlock - CATCHUP_BLOCKS : BigInt(0)
 
       this.logger.log(`Catch-up scan: blocks ${scanFrom} → ${latestBlock}`)
@@ -81,12 +92,16 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
       let chunkFrom = scanFrom
       while (chunkFrom <= latestBlock) {
         const chunkTo = chunkFrom + MAX_BLOCK_RANGE < latestBlock ? chunkFrom + MAX_BLOCK_RANGE : latestBlock
-        const logs = await client.getLogs({
-          address: this.contractAddress!,
-          event: DAILY_CHECKIN_EVENT_ABI,
-          fromBlock: chunkFrom,
-          toBlock: chunkTo,
-        })
+        const logs = await withRpcRetry(
+          () =>
+            client.getLogs({
+              address: this.contractAddress!,
+              event: DAILY_CHECKIN_EVENT_ABI,
+              fromBlock: chunkFrom,
+              toBlock: chunkTo,
+            }),
+          this.rpcRetryOptions(),
+        )
         if (logs.length > 0) {
           this.logger.log(`Catch-up chunk ${chunkFrom}→${chunkTo}: ${logs.length} event(s)`)
           await this.processLogs(logs)
@@ -109,19 +124,23 @@ export class BlockchainService implements OnModuleInit, OnModuleDestroy {
     if (!this.enabled || !this.contractAddress) return
 
     try {
-      const latestBlock = await client.getBlockNumber()
+      const latestBlock = await withRpcRetry(() => client.getBlockNumber(), this.rpcRetryOptions())
 
       if (this.lastProcessedBlock !== null && latestBlock <= this.lastProcessedBlock) {
         return
       }
 
       const fromBlock = this.lastProcessedBlock !== null ? this.lastProcessedBlock + BigInt(1) : latestBlock
-      const logs = await client.getLogs({
-        address: this.contractAddress,
-        event: DAILY_CHECKIN_EVENT_ABI,
-        fromBlock,
-        toBlock: latestBlock,
-      })
+      const logs = await withRpcRetry(
+        () =>
+          client.getLogs({
+            address: this.contractAddress!,
+            event: DAILY_CHECKIN_EVENT_ABI,
+            fromBlock,
+            toBlock: latestBlock,
+          }),
+        this.rpcRetryOptions(),
+      )
 
       if (logs.length > 0) {
         this.logger.log(`Poll found ${logs.length} new DailyCheckIn event(s)`)
