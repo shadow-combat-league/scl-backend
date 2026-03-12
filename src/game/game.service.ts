@@ -19,6 +19,7 @@ import { fromZonedTime, toZonedTime, formatInTimeZone } from "date-fns-tz";
 import { SubmitScoreDto } from "./dto/submit-score.dto";
 import { GetPlayerStatusDto } from "./dto/get-player-status.dto";
 import { BonusService } from "./bonus.service";
+import { BaseAppCodeService } from "./base-app-code.service";
 
 // Define types from Prisma client method return types
 type GameSession = Awaited<ReturnType<PrismaClient["gameSession"]["create"]>>;
@@ -47,6 +48,7 @@ export class GameService implements OnModuleInit {
     private timezoneService: TimezoneService,
     private wordpressService: WordpressService,
     private bonusService: BonusService,
+    private baseAppCodeService: BaseAppCodeService,
   ) {
     // PrismaService extends PrismaClient, so we can safely assign it
     // This ensures TypeScript recognizes all PrismaClient methods
@@ -221,8 +223,15 @@ export class GameService implements OnModuleInit {
       const bonusPlaysUsed = bonusTotals.totalBonusPlaysUsed;
       const bonusPlaysRemaining = bonusTotals.totalBonusPlaysRemaining;
 
-      // Total extra plays used = referral + bonus
-      const totalExtraPlaysUsed = referralPlaysUsed + bonusPlaysUsed;
+      // Check for base app code extra plays
+      const baseAppCodeTotals = await this.baseAppCodeService.getTotals(
+        player.walletAddress.toLowerCase(),
+      );
+      const baseAppCodePlaysUsed = baseAppCodeTotals.totalExtraPlaysUsed;
+      const baseAppCodePlaysRemaining = baseAppCodeTotals.totalExtraPlaysRemaining;
+
+      // Total extra plays used = referral + bonus + base app codes
+      const totalExtraPlaysUsed = referralPlaysUsed + bonusPlaysUsed + baseAppCodePlaysUsed;
 
       // Cap extra plays used at totalPlaysUsed to prevent data inconsistency
       // This ensures basePlaysUsed is never negative
@@ -259,9 +268,9 @@ export class GameService implements OnModuleInit {
       // This cannot go negative
       const basePlaysRemaining = Math.max(0, basePlaysAllowed - basePlaysUsed);
 
-      // Total plays remaining = base plays remaining + referral plays remaining + bonus plays remaining
+      // Total plays remaining = base plays remaining + referral plays remaining + bonus plays remaining + base app code plays remaining
       const playsRemaining =
-        basePlaysRemaining + referralExtraPlaysRemaining + bonusPlaysRemaining;
+        basePlaysRemaining + referralExtraPlaysRemaining + bonusPlaysRemaining + baseAppCodePlaysRemaining;
 
       // Debug logging for extra play calculation
       console.log("[ExtraPlays] getPlayerStatus calculation:", {
@@ -269,12 +278,14 @@ export class GameService implements OnModuleInit {
         totalPlaysUsed,
         referralPlaysUsed,
         bonusPlaysUsed,
+        baseAppCodePlaysUsed,
         safeTotalExtraPlaysUsed,
         basePlaysUsed,
         basePlaysAllowed,
         basePlaysRemaining,
         referralExtraPlaysRemaining,
         bonusPlaysRemaining,
+        baseAppCodePlaysRemaining,
         playsRemaining,
       });
 
@@ -678,6 +689,17 @@ export class GameService implements OnModuleInit {
             "[Bonus] Bonus play marked as used for:",
             player.walletAddress,
           );
+        } else {
+          // No bonus play used - check if this was a base app code play
+          const usedBaseAppCodePlay = await this.baseAppCodeService.markPlayUsed(
+            player.walletAddress.toLowerCase(),
+          );
+          if (usedBaseAppCodePlay) {
+            console.log(
+              "[BaseAppCode] Base app code play marked as used for:",
+              player.walletAddress,
+            );
+          }
         }
       }
 

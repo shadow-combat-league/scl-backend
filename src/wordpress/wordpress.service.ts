@@ -34,6 +34,15 @@ export interface GameSettingsFromWordPress {
   dailyCheckInLaunchDate: Date | null
 }
 
+export interface BaseAppCode {
+  id: number
+  code: string
+  extraPlays: number
+  start: Date
+  end: Date
+  active: boolean
+}
+
 @Injectable()
 export class WordpressService {
   private readonly wpClient: AxiosInstance
@@ -702,6 +711,80 @@ export class WordpressService {
       return gameSettings
     } catch (error) {
       console.error('[getGameSettings] WordPress API error:', error)
+      return null
+    }
+  }
+
+  /**
+   * Fetch a base_app_code by code string from WordPress.
+   * Returns the code details if found and valid (active + within date range), null otherwise.
+   */
+  async getBaseAppCode(code: string): Promise<BaseAppCode | null> {
+    const searchCode = code.trim()
+    const cacheKey = `wp:base_app_code:${searchCode.toLowerCase()}`
+    const cached = await this.cacheManager.get<BaseAppCode | null>(cacheKey)
+    if (cached !== undefined) {
+      return cached
+    }
+
+    try {
+      // Fetch all base_app_code posts and find matching code in ACF field
+      const response = await this.wpClient.get('/wp-json/wp/v2/base_app_code', {
+        params: {
+          per_page: 100,
+          _embed: true,
+        },
+      })
+
+      for (const post of response.data) {
+        const postData = post as {
+          id: number
+          acf?: {
+            code?: string
+            extra_plays?: number | string
+            start?: string
+            end?: string
+            active?: boolean | string | number
+          }
+        }
+
+        if (!postData.acf) continue
+
+        // Check if code matches (case-insensitive)
+        const postCode = postData.acf.code?.trim() || ''
+        if (postCode.toLowerCase() !== searchCode.toLowerCase()) continue
+
+        // Parse ACF fields
+        const active = postData.acf.active === true || postData.acf.active === '1' || postData.acf.active === 1 || postData.acf.active === 'true'
+        
+        const extraPlays = typeof postData.acf.extra_plays === 'string'
+          ? parseInt(postData.acf.extra_plays, 10)
+          : (postData.acf.extra_plays ?? 0)
+
+        const start = postData.acf.start ? await this.parseACFDateTime(postData.acf.start) : null
+        const end = postData.acf.end ? await this.parseACFDateTime(postData.acf.end) : null
+
+        if (!start || !end) continue
+
+        const result: BaseAppCode = {
+          id: postData.id,
+          code: postCode,
+          extraPlays,
+          start,
+          end,
+          active,
+        }
+
+        // Cache for 60 seconds
+        await this.cacheManager.set(cacheKey, result, 60 * 1000)
+        return result
+      }
+
+      // Code not found - cache null result briefly to avoid hammering WP
+      await this.cacheManager.set(cacheKey, null, 30 * 1000)
+      return null
+    } catch (error) {
+      console.error('[getBaseAppCode] WordPress API error:', error)
       return null
     }
   }

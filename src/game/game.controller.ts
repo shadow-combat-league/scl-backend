@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/co
 import { GameService } from './game.service'
 import { ReferralService } from './referral.service'
 import { BonusService, BonusType } from './bonus.service'
+import { BaseAppCodeService } from './base-app-code.service'
 import { SubmitScoreDto } from './dto/submit-score.dto'
 import { GameStateGuard } from './guards/game-state.guard'
 
@@ -11,6 +12,7 @@ export class GameController {
     private readonly gameService: GameService,
     private readonly referralService: ReferralService,
     private readonly bonusService: BonusService,
+    private readonly baseAppCodeService: BaseAppCodeService,
   ) {}
 
   @Get('state')
@@ -93,6 +95,18 @@ export class GameController {
     const status = await this.gameService.getPlayerStatus(walletAddress)
     const referral = await this.referralService.getReferralInfo(walletAddress)
     return { status, referral }
+  }
+
+  @Post('base-app-code/redeem')
+  async redeemBaseAppCode(
+    @Body() body: { walletAddress: string; code: string },
+  ) {
+    return this.baseAppCodeService.redeemCode(body.walletAddress, body.code)
+  }
+
+  @Get('base-app-code/:walletAddress')
+  async getBaseAppCodeStatus(@Param('walletAddress') walletAddress: string) {
+    return this.baseAppCodeService.getRedemptionStatus(walletAddress)
   }
 
   @Get('test-wordpress-settings')

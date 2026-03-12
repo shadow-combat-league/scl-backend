@@ -141,3 +141,18 @@ model BlockchainCheckIn {
   @@index([walletAddress])
   @@index([checkInAt])
 }
+
+model BaseAppCodeRedemption {
+  id              Int      @id @default(autoincrement())
+  walletAddress   String   @db.VarChar(42)
+  code            String   @db.VarChar(255) // The code redeemed (from WordPress ACF)
+  wpPostId        Int // WordPress post ID for reference
+  extraPlaysTotal Int // Extra plays granted for this code
+  extraPlaysUsed  Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([walletAddress, code]) // Each wallet can only redeem each code once
+  @@index([walletAddress])
+  @@index([code])
+}
