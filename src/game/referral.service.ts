@@ -1,7 +1,10 @@
 import { Injectable, HttpException, HttpStatus, Inject, forwardRef } from '@nestjs/common'
+import { CACHE_MANAGER } from '@nestjs/cache-manager'
+import { Cache } from 'cache-manager'
 import { PrismaService, PrismaClient } from '../prisma/prisma.service'
 import { WordpressService } from '../wordpress/wordpress.service'
 import { GameService } from './game.service'
+import { MetricsService } from '../metrics/metrics.service'
 
 @Injectable()
 export class ReferralService {
@@ -12,8 +15,19 @@ export class ReferralService {
     @Inject(forwardRef(() => GameService))
     private readonly gameService: GameService,
     private readonly prismaService: PrismaService,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private metricsService: MetricsService,
   ) {
     this.prisma = prismaService
+  }
+
+  private getCacheKey(walletAddress: string): string {
+    return `referral:${walletAddress.toLowerCase()}`
+  }
+
+  private async invalidateCache(walletAddress: string): Promise<void> {
+    const cacheKey = this.getCacheKey(walletAddress)
+    await this.cacheManager.del(cacheKey)
   }
 
   /**
@@ -21,7 +35,6 @@ export class ReferralService {
    * Returns the number of extra plays granted
    */
   async applyReferralCode(walletAddress: string, code: string): Promise<{ extraPlays: number; message: string }> {
-    // Normalize wallet address
     const normalizedWallet = walletAddress.toLowerCase()
 
     // Check if wallet already has a referral code
@@ -30,6 +43,7 @@ export class ReferralService {
     })
 
     if (existingReferral) {
+      this.metricsService.referralApplications.inc({ status: 'already_used' })
       throw new HttpException(
         'This wallet has already used a referral code',
         HttpStatus.BAD_REQUEST,
@@ -39,6 +53,7 @@ export class ReferralService {
     // Validate that the code exists in WordPress
     const refCodePost = await this.wordpressService.getGameRefCodeByCode(code)
     if (!refCodePost) {
+      this.metricsService.referralApplications.inc({ status: 'invalid_code' })
       throw new HttpException(
         'Invalid referral code',
         HttpStatus.NOT_FOUND,
@@ -61,6 +76,13 @@ export class ReferralService {
       },
     })
 
+    // Invalidate cache after successful application
+    await this.invalidateCache(normalizedWallet)
+
+    // Track successful application
+    this.metricsService.referralApplications.inc({ status: 'success' })
+    this.metricsService.referralPlaysGranted.inc(extraPlays)
+
     return {
       extraPlays,
       message: `Referral code applied! You received ${extraPlays} extra plays.`,
@@ -69,6 +91,7 @@ export class ReferralService {
 
   /**
    * Get referral information for a wallet
+   * Cached for 60 seconds to reduce DB load.
    */
   async getReferralInfo(walletAddress: string): Promise<{
     hasReferral: boolean
@@ -78,21 +101,65 @@ export class ReferralService {
     extraPlaysRemaining?: number
   }> {
     const normalizedWallet = walletAddress.toLowerCase()
+    const cacheKey = this.getCacheKey(normalizedWallet)
+
+    // Check cache first
+    const cacheStart = Date.now()
+    const cached = await this.cacheManager.get<{
+      hasReferral: boolean
+      code?: string
+      extraPlaysTotal?: number
+      extraPlaysUsed?: number
+      extraPlaysRemaining?: number
+    }>(cacheKey)
+    const cacheDuration = (Date.now() - cacheStart) / 1000
+
+    this.metricsService.cacheOperations.observe(
+      { operation: 'get', cache_key_pattern: 'referral:*' },
+      cacheDuration,
+    )
+
+    if (cached !== undefined && cached !== null) {
+      this.metricsService.cacheHits.inc({ cache_key_pattern: 'referral:*' })
+      return cached
+    }
+
+    this.metricsService.cacheMisses.inc({ cache_key_pattern: 'referral:*' })
+
+    // Fetch from database
     const referral = await this.prisma.referralCode.findUnique({
       where: { walletAddress: normalizedWallet },
     })
 
-    if (!referral) {
-      return { hasReferral: false }
+    let result: {
+      hasReferral: boolean
+      code?: string
+      extraPlaysTotal?: number
+      extraPlaysUsed?: number
+      extraPlaysRemaining?: number
     }
 
-    return {
-      hasReferral: true,
-      code: referral.code,
-      extraPlaysTotal: referral.extraPlaysTotal,
-      extraPlaysUsed: referral.extraPlaysUsed,
-      extraPlaysRemaining: referral.extraPlaysTotal - referral.extraPlaysUsed,
+    if (!referral) {
+      result = { hasReferral: false }
+    } else {
+      result = {
+        hasReferral: true,
+        code: referral.code,
+        extraPlaysTotal: referral.extraPlaysTotal,
+        extraPlaysUsed: referral.extraPlaysUsed,
+        extraPlaysRemaining: referral.extraPlaysTotal - referral.extraPlaysUsed,
+      }
     }
+
+    // Cache for 60 seconds
+    const cacheSetStart = Date.now()
+    await this.cacheManager.set(cacheKey, result, 60 * 1000)
+    this.metricsService.cacheOperations.observe(
+      { operation: 'set', cache_key_pattern: 'referral:*' },
+      (Date.now() - cacheSetStart) / 1000,
+    )
+
+    return result
   }
 
   /**
@@ -105,15 +172,13 @@ export class ReferralService {
     })
 
     if (!referral) {
-      return false // No referral code, so this wasn't a referral play
+      return false
     }
 
-    // Check if there are any referral plays remaining
     if (referral.extraPlaysUsed >= referral.extraPlaysTotal) {
-      return false // All referral plays used
+      return false
     }
 
-    // Increment used count
     await this.prisma.referralCode.update({
       where: { walletAddress: normalizedWallet },
       data: {
@@ -121,6 +186,12 @@ export class ReferralService {
       },
     })
 
-    return true // Successfully used a referral play
+    // Invalidate cache after play is used
+    await this.invalidateCache(normalizedWallet)
+
+    // Track play consumed
+    this.metricsService.referralPlaysConsumed.inc()
+
+    return true
   }
 }

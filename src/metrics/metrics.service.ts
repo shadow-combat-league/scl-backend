@@ -43,6 +43,16 @@ export class MetricsService implements OnModuleInit {
   public readonly kickWebSocketSubscriptions: Counter<string>
   public readonly kickOAuthExchanges: Counter<string>
 
+  // Bonus Metrics (Telegram / Base Farcaster)
+  public readonly bonusClaims: Counter<string>
+  public readonly bonusPlaysGranted: Counter<string>
+  public readonly bonusPlaysConsumed: Counter<string>
+
+  // Referral Metrics
+  public readonly referralApplications: Counter<string>
+  public readonly referralPlaysGranted: Counter<string>
+  public readonly referralPlaysConsumed: Counter<string>
+
   // Base App Code Metrics
   public readonly baseAppCodeRedemptions: Counter<string>
   public readonly baseAppCodePlaysGranted: Counter<string>
@@ -225,6 +235,47 @@ export class MetricsService implements OnModuleInit {
       name: 'kick_oauth_token_exchanges_total',
       help: 'Total number of Kick OAuth token exchange attempts',
       labelNames: ['status'],
+      registers: [this.register],
+    })
+
+    // Bonus Metrics (Telegram / Base Farcaster)
+    this.bonusClaims = new Counter({
+      name: 'bonus_claims_total',
+      help: 'Total number of bonus claim attempts',
+      labelNames: ['bonus_type', 'status'], // bonus_type: telegram|base_farcaster, status: success|already_claimed
+      registers: [this.register],
+    })
+
+    this.bonusPlaysGranted = new Counter({
+      name: 'bonus_plays_granted_total',
+      help: 'Total number of extra plays granted via bonuses (Telegram/Base Farcaster)',
+      registers: [this.register],
+    })
+
+    this.bonusPlaysConsumed = new Counter({
+      name: 'bonus_plays_consumed_total',
+      help: 'Total number of bonus plays consumed',
+      labelNames: ['bonus_type'], // telegram|base_farcaster
+      registers: [this.register],
+    })
+
+    // Referral Metrics
+    this.referralApplications = new Counter({
+      name: 'referral_applications_total',
+      help: 'Total number of referral code application attempts',
+      labelNames: ['status'], // success, already_used, invalid_code
+      registers: [this.register],
+    })
+
+    this.referralPlaysGranted = new Counter({
+      name: 'referral_plays_granted_total',
+      help: 'Total number of extra plays granted via referral codes',
+      registers: [this.register],
+    })
+
+    this.referralPlaysConsumed = new Counter({
+      name: 'referral_plays_consumed_total',
+      help: 'Total number of referral plays consumed',
       registers: [this.register],
     })
 
