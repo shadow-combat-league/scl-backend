@@ -43,6 +43,11 @@ export class MetricsService implements OnModuleInit {
   public readonly kickWebSocketSubscriptions: Counter<string>
   public readonly kickOAuthExchanges: Counter<string>
 
+  // Base App Code Metrics
+  public readonly baseAppCodeRedemptions: Counter<string>
+  public readonly baseAppCodePlaysGranted: Counter<string>
+  public readonly baseAppCodePlaysConsumed: Counter<string>
+
   constructor() {
     // Create a new registry
     this.register = new Registry()
@@ -220,6 +225,26 @@ export class MetricsService implements OnModuleInit {
       name: 'kick_oauth_token_exchanges_total',
       help: 'Total number of Kick OAuth token exchange attempts',
       labelNames: ['status'],
+      registers: [this.register],
+    })
+
+    // Base App Code Metrics
+    this.baseAppCodeRedemptions = new Counter({
+      name: 'base_app_code_redemptions_total',
+      help: 'Total number of Base App Code redemption attempts',
+      labelNames: ['status'], // success, already_redeemed, invalid_code, inactive, not_yet_available, expired
+      registers: [this.register],
+    })
+
+    this.baseAppCodePlaysGranted = new Counter({
+      name: 'base_app_code_plays_granted_total',
+      help: 'Total number of extra plays granted via Base App Codes',
+      registers: [this.register],
+    })
+
+    this.baseAppCodePlaysConsumed = new Counter({
+      name: 'base_app_code_plays_consumed_total',
+      help: 'Total number of Base App Code plays consumed',
       registers: [this.register],
     })
   }
