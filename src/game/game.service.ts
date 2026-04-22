@@ -1391,9 +1391,34 @@ export class GameService implements OnModuleInit {
           fallbackError,
         );
       }
-      throw new Error(
-        "WordPress game settings are required and no fallback is available. Please configure game_launch_date in WordPress ACF.",
-      );
+
+      // Last-resort safety net: use env fallback so backend does not crash-loop when WordPress
+      // content/settings are temporarily unavailable during deployments.
+      const launchDateFromEnv = this.configService.get<string>("GAME_LAUNCH_DATE");
+      if (launchDateFromEnv) {
+        const fallbackLaunchDate = new Date(launchDateFromEnv);
+        if (!Number.isNaN(fallbackLaunchDate.getTime())) {
+          console.warn(
+            `[getSettings] ⚠️ WordPress + stale cache unavailable; using GAME_LAUNCH_DATE fallback (${launchDateFromEnv})`,
+          );
+          wpSettings = {
+            launchDate: fallbackLaunchDate,
+            gameState: "ACTIVE",
+            weeklyResetEnabled: false,
+            weeklyResetDay: 0,
+            weeklyResetHour: 1,
+            weeklyResetMinute: 0,
+            dailyCheckInEnabled: false,
+            dailyCheckInLaunchDate: null,
+          };
+        }
+      }
+
+      if (!wpSettings || !wpSettings.launchDate) {
+        throw new Error(
+          "WordPress game settings are required and no fallback is available. Please configure game_launch_date in WordPress ACF.",
+        );
+      }
     }
 
     // --- Get / initialise DB-only fields ---

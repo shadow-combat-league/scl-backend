@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { Inject } from '@nestjs/common'
 import { CACHE_MANAGER } from '@nestjs/cache-manager'
 import { Cache } from 'cache-manager'
-import axios, { AxiosInstance } from 'axios'
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 import { ConfigService } from '@nestjs/config'
 import { TimezoneService } from '../common/timezone.service'
 
@@ -59,6 +59,35 @@ export class WordpressService {
     })
   }
 
+  private async getWithRestRouteFallback(
+    path: string,
+    config?: AxiosRequestConfig,
+  ): Promise<AxiosResponse<any>> {
+    try {
+      return await this.wpClient.get(path, config)
+    } catch (error) {
+      if (
+        axios.isAxiosError(error) &&
+        error.response?.status === 404 &&
+        path.startsWith('/wp-json/')
+      ) {
+        const restRoute = path.replace('/wp-json', '')
+        console.warn(
+          `[WordPress] Pretty permalink REST path failed (404). Falling back to /index.php?rest_route=${restRoute}`,
+        )
+        return this.wpClient.get('/index.php', {
+          ...(config || {}),
+          params: {
+            rest_route: restRoute,
+            ...(config?.params || {}),
+          },
+        })
+      }
+
+      throw error
+    }
+  }
+
   async getPosts(limit = 10, page = 1): Promise<WordPressPost[]> {
     const cacheKey = `wp:posts:${limit}:${page}`
     const cached = await this.cacheManager.get<WordPressPost[]>(cacheKey)
@@ -67,7 +96,7 @@ export class WordpressService {
     }
 
     try {
-      const response = await this.wpClient.get('/wp-json/wp/v2/posts', {
+      const response = await this.getWithRestRouteFallback('/wp-json/wp/v2/posts', {
         params: {
           per_page: limit,
           page,
@@ -115,7 +144,7 @@ export class WordpressService {
     }
 
     try {
-      const response = await this.wpClient.get(`/wp-json/wp/v2/posts`, {
+      const response = await this.getWithRestRouteFallback(`/wp-json/wp/v2/posts`, {
         params: {
           slug,
           _embed: true,
@@ -170,7 +199,7 @@ export class WordpressService {
 
     try {
       // Search by slug first (exact match, case-insensitive)
-      let response = await this.wpClient.get(`/wp-json/wp/v2/game_ref_code`, {
+      let response = await this.getWithRestRouteFallback(`/wp-json/wp/v2/game_ref_code`, {
         params: {
           slug: searchSlug,
           _embed: true,
@@ -179,7 +208,7 @@ export class WordpressService {
 
       // If no match by slug, try searching by title
       if (response.data.length === 0) {
-        response = await this.wpClient.get(`/wp-json/wp/v2/game_ref_code`, {
+        response = await this.getWithRestRouteFallback(`/wp-json/wp/v2/game_ref_code`, {
           params: {
             search: code,
             _embed: true,
@@ -246,7 +275,7 @@ export class WordpressService {
 
     try {
       // Get the scl_site_settings post type (should only be 1 post)
-      const settingsResponse = await this.wpClient.get('/wp-json/wp/v2/scl_site_settings', {
+      const settingsResponse = await this.getWithRestRouteFallback('/wp-json/wp/v2/scl_site_settings', {
         params: {
           per_page: 1,
           _embed: true,
@@ -288,7 +317,7 @@ export class WordpressService {
       // If ACF not exposed, try fetching ACF fields directly via ACF REST API
       if (!settingsPost.acf && !settingsPost.meta) {
         try {
-          const acfResponse = await this.wpClient.get(`/wp-json/acf/v3/scl_site_settings/${settingsPost.id}`)
+          const acfResponse = await this.getWithRestRouteFallback(`/wp-json/acf/v3/scl_site_settings/${settingsPost.id}`)
           if (acfResponse.data && acfResponse.data.acf) {
             const isLiveValue = acfResponse.data.acf.livestream_live
             isLive = isLiveValue === true || isLiveValue === '1' || isLiveValue === 1 || isLiveValue === 'true'
@@ -310,7 +339,7 @@ export class WordpressService {
         try {
           // Get all livestreams post type
           console.log('[getSiteSettings] Fetching livestreams from WordPress API...')
-          const livestreamsResponse = await this.wpClient.get('/wp-json/wp/v2/livestreams', {
+          const livestreamsResponse = await this.getWithRestRouteFallback('/wp-json/wp/v2/livestreams', {
             params: {
               per_page: 100, // Get enough to check all active streams
               _embed: true,
@@ -370,7 +399,7 @@ export class WordpressService {
             // If ACF not exposed, try ACF REST API
             if (!livestreamPost.acf && !livestreamPost.meta) {
               try {
-                const acfResponse = await this.wpClient.get(`/wp-json/acf/v3/livestreams/${livestreamPost.id}`)
+                const acfResponse = await this.getWithRestRouteFallback(`/wp-json/acf/v3/livestreams/${livestreamPost.id}`)
                 if (acfResponse.data && acfResponse.data.acf) {
                   if (acfResponse.data.acf.start) {
                     startDate = await this.parseACFDateTime(acfResponse.data.acf.start)
@@ -471,7 +500,7 @@ export class WordpressService {
 
     try {
       // Get the scl_site_settings post type (should only be 1 post)
-      const settingsResponse = await this.wpClient.get('/wp-json/wp/v2/scl_site_settings', {
+      const settingsResponse = await this.getWithRestRouteFallback('/wp-json/wp/v2/scl_site_settings', {
         params: {
           per_page: 1,
           _embed: true,
@@ -639,7 +668,7 @@ export class WordpressService {
       if ((!settingsPost.acf && !settingsPost.meta) || !gameSettings.launchDate) {
         console.log(`[getGameSettings] ACF not exposed or launchDate missing, trying ACF REST API...`)
         try {
-          const acfResponse = await this.wpClient.get(`/wp-json/acf/v3/scl_site_settings/${settingsPost.id}`)
+          const acfResponse = await this.getWithRestRouteFallback(`/wp-json/acf/v3/scl_site_settings/${settingsPost.id}`)
           if (acfResponse.data && acfResponse.data.acf) {
             console.log(`[getGameSettings] ACF REST API data:`, JSON.stringify(acfResponse.data.acf, null, 2))
             
@@ -729,7 +758,7 @@ export class WordpressService {
 
     try {
       // Fetch all base_app_code posts and find matching code in ACF field
-      const response = await this.wpClient.get('/wp-json/wp/v2/base_app_code', {
+      const response = await this.getWithRestRouteFallback('/wp-json/wp/v2/base_app_code', {
         params: {
           per_page: 100,
           _embed: true,
