@@ -43,6 +43,14 @@ export class MetricsService implements OnModuleInit {
   public readonly kickWebSocketSubscriptions: Counter<string>
   public readonly kickOAuthExchanges: Counter<string>
 
+  // Livestream Overlay Metrics
+  public readonly livestreamWsClients: Gauge<string>
+  public readonly livestreamWsConnections: Counter<string>
+  public readonly livestreamWsDisconnections: Counter<string>
+  public readonly livestreamStateUpdates: Counter<string>
+  public readonly livestreamAuthAttempts: Counter<string>
+  public readonly livestreamAuthValidations: Counter<string>
+
   // Bonus Metrics (Telegram / Base Farcaster)
   public readonly bonusClaims: Counter<string>
   public readonly bonusPlaysGranted: Counter<string>
@@ -234,6 +242,48 @@ export class MetricsService implements OnModuleInit {
     this.kickOAuthExchanges = new Counter({
       name: 'kick_oauth_token_exchanges_total',
       help: 'Total number of Kick OAuth token exchange attempts',
+      labelNames: ['status'],
+      registers: [this.register],
+    })
+
+    // Livestream Overlay Metrics
+    this.livestreamWsClients = new Gauge({
+      name: 'livestream_ws_clients_active',
+      help: 'Number of active livestream websocket clients',
+      registers: [this.register],
+    })
+
+    this.livestreamWsConnections = new Counter({
+      name: 'livestream_ws_connections_total',
+      help: 'Total number of livestream websocket connections',
+      labelNames: ['role'],
+      registers: [this.register],
+    })
+
+    this.livestreamWsDisconnections = new Counter({
+      name: 'livestream_ws_disconnections_total',
+      help: 'Total number of livestream websocket disconnections',
+      labelNames: ['role'],
+      registers: [this.register],
+    })
+
+    this.livestreamStateUpdates = new Counter({
+      name: 'livestream_state_updates_total',
+      help: 'Total number of livestream match state updates',
+      labelNames: ['source'],
+      registers: [this.register],
+    })
+
+    this.livestreamAuthAttempts = new Counter({
+      name: 'livestream_auth_attempts_total',
+      help: 'Total number of livestream auth login attempts',
+      labelNames: ['role', 'status'],
+      registers: [this.register],
+    })
+
+    this.livestreamAuthValidations = new Counter({
+      name: 'livestream_auth_validations_total',
+      help: 'Total number of livestream token validations',
       labelNames: ['status'],
       registers: [this.register],
     })

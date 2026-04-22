@@ -21,7 +21,8 @@
     "prisma:studio": "dotenv -e .env -- prisma studio",
     "prisma:migrate:deploy": "dotenv -e .env -- prisma migrate deploy",
     "test:leaderboard:generate": "ts-node scripts/generate-test-leaderboard.ts generate",
-    "test:leaderboard:cleanup": "ts-node scripts/generate-test-leaderboard.ts cleanup"
+    "test:leaderboard:cleanup": "ts-node scripts/generate-test-leaderboard.ts cleanup",
+    "export:weekly-snapshots:excel": "ts-node scripts/export-weekly-snapshots-to-excel.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^3.0.1",
@@ -45,6 +46,7 @@
     "class-validator": "^0.14.0",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
+    "exceljs": "^4.4.0",
     "mysql2": "^3.17.5",
     "pg": "^8.18.0",
     "prom-client": "^15.1.3",

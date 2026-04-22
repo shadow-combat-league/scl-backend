@@ -55,6 +55,20 @@ jobs:
             --dry-run=client -o yaml | kubectl apply -f - || \
           echo "Secret may already exist, continuing..."
 
+      - name: Create Livestream auth secret (if not exists)
+        env:
+          LIVESTREAM_AUTH_SECRET: ${{ secrets.LIVESTREAM_AUTH_SECRET }}
+          LIVESTREAM_JUDGE_PASSWORD: ${{ secrets.LIVESTREAM_JUDGE_PASSWORD }}
+          LIVESTREAM_OVERLAY_PASSWORD: ${{ secrets.LIVESTREAM_OVERLAY_PASSWORD }}
+        run: |
+          kubectl create secret generic livestream-auth-secret \
+            --from-literal=auth-secret="$LIVESTREAM_AUTH_SECRET" \
+            --from-literal=judge-password="$LIVESTREAM_JUDGE_PASSWORD" \
+            --from-literal=overlay-password="$LIVESTREAM_OVERLAY_PASSWORD" \
+            -n ${{ env.NAMESPACE }} \
+            --dry-run=client -o yaml | kubectl apply -f - || \
+          echo "Livestream secret may already exist, continuing..."
+
       - name: Deploy to Kubernetes
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}

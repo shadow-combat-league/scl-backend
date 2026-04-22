@@ -1,0 +1,131 @@
+export type LivestreamRole = 'judge' | 'overlay'
+
+export interface LivestreamRobotState {
+  name: string
+  maxHp: number
+  currentHp: number
+  controllerName: string
+  controllerImage: string
+  heartRate: number
+}
+
+export interface LivestreamOverlayElementsState {
+  showRound: boolean
+  showRobotName: boolean
+  showControllerName: boolean
+  showHeartRate: boolean
+  showLogo: boolean
+  showTagline: boolean
+}
+
+export interface LivestreamMatchState {
+  roundNumber: number
+  isOverlayVisible: boolean
+  isBgMockVisible: boolean
+  backgroundColor: string
+  activeTheme: 'cyberpunk' | 'hologram' | 'arcade'
+  overlayElements: LivestreamOverlayElementsState
+  robot1: LivestreamRobotState
+  robot2: LivestreamRobotState
+}
+
+export const defaultLivestreamMatchState: LivestreamMatchState = {
+  roundNumber: 1,
+  isOverlayVisible: true,
+  isBgMockVisible: false,
+  backgroundColor: '#000000',
+  activeTheme: 'cyberpunk',
+  overlayElements: {
+    showRound: true,
+    showRobotName: true,
+    showControllerName: true,
+    showHeartRate: true,
+    showLogo: true,
+    showTagline: true,
+  },
+  robot1: {
+    name: 'IRON CLAW',
+    maxHp: 1000,
+    currentHp: 1000,
+    controllerName: 'CONTROLLER 01',
+    controllerImage: 'https://i.pravatar.cc/300?img=11',
+    heartRate: 85,
+  },
+  robot2: {
+    name: 'STEEL FANG',
+    maxHp: 1000,
+    currentHp: 1000,
+    controllerName: 'CONTROLLER 02',
+    controllerImage: 'https://i.pravatar.cc/300?img=32',
+    heartRate: 82,
+  },
+}
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+
+const sanitizeText = (value: unknown, fallback: string) =>
+  typeof value === 'string' && value.trim().length > 0 ? value.trim().slice(0, 60) : fallback
+
+const sanitizeHexColor = (value: unknown, fallback: string) =>
+  typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value.trim()) ? value.trim().toUpperCase() : fallback
+
+const sanitizeTheme = (value: unknown, fallback: LivestreamMatchState['activeTheme']) => {
+  if (value === 'cyberpunk' || value === 'hologram' || value === 'arcade') return value
+  return fallback
+}
+
+const sanitizeRobot = (candidate: unknown, fallback: LivestreamRobotState): LivestreamRobotState => {
+  const source = typeof candidate === 'object' && candidate !== null ? (candidate as Record<string, unknown>) : {}
+
+  const maxHpRaw = Number(source.maxHp)
+  const maxHp = Number.isFinite(maxHpRaw) ? clamp(Math.floor(maxHpRaw), 100, 10000) : fallback.maxHp
+
+  const currentHpRaw = Number(source.currentHp)
+  const currentHp = Number.isFinite(currentHpRaw) ? clamp(Math.floor(currentHpRaw), 0, maxHp) : fallback.currentHp
+
+  const heartRateRaw = Number(source.heartRate)
+
+  return {
+    name: sanitizeText(source.name, fallback.name),
+    maxHp,
+    currentHp,
+    controllerName: sanitizeText(source.controllerName, fallback.controllerName),
+    controllerImage: sanitizeText(source.controllerImage, fallback.controllerImage),
+    heartRate: Number.isFinite(heartRateRaw) ? clamp(Math.floor(heartRateRaw), 40, 220) : fallback.heartRate,
+  }
+}
+
+const sanitizeOverlayElements = (
+  candidate: unknown,
+  fallback: LivestreamOverlayElementsState
+): LivestreamOverlayElementsState => {
+  const source = typeof candidate === 'object' && candidate !== null ? (candidate as Record<string, unknown>) : {}
+  return {
+    showRound: typeof source.showRound === 'boolean' ? source.showRound : fallback.showRound,
+    showRobotName: typeof source.showRobotName === 'boolean' ? source.showRobotName : fallback.showRobotName,
+    showControllerName:
+      typeof source.showControllerName === 'boolean' ? source.showControllerName : fallback.showControllerName,
+    showHeartRate: typeof source.showHeartRate === 'boolean' ? source.showHeartRate : fallback.showHeartRate,
+    showLogo: typeof source.showLogo === 'boolean' ? source.showLogo : fallback.showLogo,
+    showTagline: typeof source.showTagline === 'boolean' ? source.showTagline : fallback.showTagline,
+  }
+}
+
+export const sanitizeLivestreamState = (
+  candidate: unknown,
+  fallback: LivestreamMatchState = defaultLivestreamMatchState
+): LivestreamMatchState => {
+  const source = typeof candidate === 'object' && candidate !== null ? (candidate as Record<string, unknown>) : {}
+  const roundRaw = Number(source.roundNumber)
+
+  return {
+    roundNumber: Number.isFinite(roundRaw) ? clamp(Math.floor(roundRaw), 1, 99) : fallback.roundNumber,
+    isOverlayVisible: typeof source.isOverlayVisible === 'boolean' ? source.isOverlayVisible : fallback.isOverlayVisible,
+    isBgMockVisible: typeof source.isBgMockVisible === 'boolean' ? source.isBgMockVisible : fallback.isBgMockVisible,
+    backgroundColor: sanitizeHexColor(source.backgroundColor, fallback.backgroundColor),
+    activeTheme: sanitizeTheme(source.activeTheme, fallback.activeTheme),
+    overlayElements: sanitizeOverlayElements(source.overlayElements, fallback.overlayElements),
+    robot1: sanitizeRobot(source.robot1, fallback.robot1),
+    robot2: sanitizeRobot(source.robot2, fallback.robot2),
+  }
+}
