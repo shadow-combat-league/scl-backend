@@ -18,11 +18,14 @@ export interface LivestreamOverlayElementsState {
   showTagline: boolean
 }
 
+export type LivestreamOverlayAspectMode = 'fill' | 'lock16x9'
+
 export interface LivestreamMatchState {
   roundNumber: number
   isOverlayVisible: boolean
   isBgMockVisible: boolean
   backgroundColor: string
+  overlayAspectMode: LivestreamOverlayAspectMode
   activeTheme: 'cyberpunk' | 'hologram' | 'arcade'
   overlayElements: LivestreamOverlayElementsState
   robot1: LivestreamRobotState
@@ -34,6 +37,7 @@ export const defaultLivestreamMatchState: LivestreamMatchState = {
   isOverlayVisible: true,
   isBgMockVisible: false,
   backgroundColor: '#000000',
+  overlayAspectMode: 'lock16x9',
   activeTheme: 'cyberpunk',
   overlayElements: {
     showRound: true,
@@ -71,6 +75,14 @@ const sanitizeHexColor = (value: unknown, fallback: string) =>
 
 const sanitizeTheme = (value: unknown, fallback: LivestreamMatchState['activeTheme']) => {
   if (value === 'cyberpunk' || value === 'hologram' || value === 'arcade') return value
+  return fallback
+}
+
+const sanitizeOverlayAspectMode = (
+  value: unknown,
+  fallback: LivestreamMatchState['overlayAspectMode']
+): LivestreamMatchState['overlayAspectMode'] => {
+  if (value === 'fill' || value === 'lock16x9') return value
   return fallback
 }
 
@@ -123,6 +135,7 @@ export const sanitizeLivestreamState = (
     isOverlayVisible: typeof source.isOverlayVisible === 'boolean' ? source.isOverlayVisible : fallback.isOverlayVisible,
     isBgMockVisible: typeof source.isBgMockVisible === 'boolean' ? source.isBgMockVisible : fallback.isBgMockVisible,
     backgroundColor: sanitizeHexColor(source.backgroundColor, fallback.backgroundColor),
+    overlayAspectMode: sanitizeOverlayAspectMode(source.overlayAspectMode, fallback.overlayAspectMode),
     activeTheme: sanitizeTheme(source.activeTheme, fallback.activeTheme),
     overlayElements: sanitizeOverlayElements(source.overlayElements, fallback.overlayElements),
     robot1: sanitizeRobot(source.robot1, fallback.robot1),
