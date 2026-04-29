@@ -17,10 +17,13 @@ export class LivestreamStateService {
   ) {}
 
   getState(): LivestreamMatchState {
+    this.state = sanitizeLivestreamState(this.state, defaultLivestreamMatchState)
     return JSON.parse(JSON.stringify(this.state))
   }
 
   updateState(candidate: unknown, source: 'http' | 'websocket'): LivestreamMatchState {
+    // Migrate existing in-memory state forward when new keys are introduced.
+    this.state = sanitizeLivestreamState(this.state, defaultLivestreamMatchState)
     this.state = sanitizeLivestreamState(candidate, this.state)
     this.metricsService.livestreamStateUpdates.inc({ source })
     this.eventEmitter.emit('livestream.state.updated', this.getState())

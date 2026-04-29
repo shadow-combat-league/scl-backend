@@ -13,9 +13,26 @@ export interface LivestreamOverlayElementsState {
   showRound: boolean
   showRobotName: boolean
   showControllerName: boolean
+  showControllerImage: boolean
+  showVsSymbol: boolean
   showHeartRate: boolean
   showLogo: boolean
   showTagline: boolean
+}
+
+export interface LivestreamSideAccentColors {
+  left: string
+  right: string
+}
+
+export interface LivestreamHudScaleState {
+  topHud: number
+  hpBars: number
+  vsSymbol: number
+  roundBadge: number
+  heartRate: number
+  fighterPicture: number
+  centerBrand: number
 }
 
 export type LivestreamOverlayAspectMode = 'fill' | 'lock16x9'
@@ -26,6 +43,8 @@ export interface LivestreamMatchState {
   isBgMockVisible: boolean
   backgroundColor: string
   overlayAspectMode: LivestreamOverlayAspectMode
+  sideAccentColors: LivestreamSideAccentColors
+  hudScale: LivestreamHudScaleState
   activeTheme: 'cyberpunk' | 'hologram' | 'arcade'
   overlayElements: LivestreamOverlayElementsState
   robot1: LivestreamRobotState
@@ -38,11 +57,26 @@ export const defaultLivestreamMatchState: LivestreamMatchState = {
   isBgMockVisible: false,
   backgroundColor: '#000000',
   overlayAspectMode: 'lock16x9',
+  sideAccentColors: {
+    left: '#3B82F6',
+    right: '#EF4444',
+  },
+  hudScale: {
+    topHud: 1,
+    hpBars: 1,
+    vsSymbol: 1,
+    roundBadge: 1,
+    heartRate: 1,
+    fighterPicture: 1,
+    centerBrand: 1,
+  },
   activeTheme: 'cyberpunk',
   overlayElements: {
     showRound: true,
     showRobotName: true,
     showControllerName: true,
+    showControllerImage: true,
+    showVsSymbol: true,
     showHeartRate: true,
     showLogo: true,
     showTagline: true,
@@ -117,9 +151,44 @@ const sanitizeOverlayElements = (
     showRobotName: typeof source.showRobotName === 'boolean' ? source.showRobotName : fallback.showRobotName,
     showControllerName:
       typeof source.showControllerName === 'boolean' ? source.showControllerName : fallback.showControllerName,
+    showControllerImage:
+      typeof source.showControllerImage === 'boolean' ? source.showControllerImage : fallback.showControllerImage,
+    showVsSymbol: typeof source.showVsSymbol === 'boolean' ? source.showVsSymbol : fallback.showVsSymbol,
     showHeartRate: typeof source.showHeartRate === 'boolean' ? source.showHeartRate : fallback.showHeartRate,
     showLogo: typeof source.showLogo === 'boolean' ? source.showLogo : fallback.showLogo,
     showTagline: typeof source.showTagline === 'boolean' ? source.showTagline : fallback.showTagline,
+  }
+}
+
+const sanitizeSideAccentColors = (
+  candidate: unknown,
+  fallback: LivestreamSideAccentColors
+): LivestreamSideAccentColors => {
+  const source = typeof candidate === 'object' && candidate !== null ? (candidate as Record<string, unknown>) : {}
+  return {
+    left: sanitizeHexColor(source.left, fallback.left),
+    right: sanitizeHexColor(source.right, fallback.right),
+  }
+}
+
+const sanitizeHudScale = (
+  candidate: unknown,
+  fallback: LivestreamHudScaleState
+): LivestreamHudScaleState => {
+  const source = typeof candidate === 'object' && candidate !== null ? (candidate as Record<string, unknown>) : {}
+  const clampScale = (value: unknown, fallbackValue: number) => {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) return fallbackValue
+    return clamp(parsed, 0.6, 1.8)
+  }
+  return {
+    topHud: clampScale(source.topHud, fallback.topHud),
+    hpBars: clampScale(source.hpBars, fallback.hpBars),
+    vsSymbol: clampScale(source.vsSymbol, fallback.vsSymbol),
+    roundBadge: clampScale(source.roundBadge, fallback.roundBadge),
+    heartRate: clampScale(source.heartRate, fallback.heartRate),
+    fighterPicture: clampScale(source.fighterPicture, fallback.fighterPicture),
+    centerBrand: clampScale(source.centerBrand, fallback.centerBrand),
   }
 }
 
@@ -136,6 +205,8 @@ export const sanitizeLivestreamState = (
     isBgMockVisible: typeof source.isBgMockVisible === 'boolean' ? source.isBgMockVisible : fallback.isBgMockVisible,
     backgroundColor: sanitizeHexColor(source.backgroundColor, fallback.backgroundColor),
     overlayAspectMode: sanitizeOverlayAspectMode(source.overlayAspectMode, fallback.overlayAspectMode),
+    sideAccentColors: sanitizeSideAccentColors(source.sideAccentColors, fallback.sideAccentColors),
+    hudScale: sanitizeHudScale(source.hudScale, fallback.hudScale),
     activeTheme: sanitizeTheme(source.activeTheme, fallback.activeTheme),
     overlayElements: sanitizeOverlayElements(source.overlayElements, fallback.overlayElements),
     robot1: sanitizeRobot(source.robot1, fallback.robot1),
