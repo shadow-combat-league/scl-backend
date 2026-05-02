@@ -14,6 +14,7 @@ import { KickChatService } from './kick-chat.service'
 import { MetricsService } from '../metrics/metrics.service'
 
 @WebSocketGateway({
+  namespace: '/kick-chat',
   cors: {
     origin: '*',
     credentials: true,
